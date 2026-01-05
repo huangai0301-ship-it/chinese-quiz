@@ -3,19 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>國文科即時測驗系統 Pro</title>
+    <title>國文科即時測驗系統 Pro (雲端同步終極版)</title>
     
-    <!-- 1. 基礎環境：React 18 -->
+    <!-- 基礎環境 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    
-    <!-- 2. Babel：解決 JSX 解析問題（防止 Unexpected token '<'） -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- 3. 圖標庫：使用 Vanilla Lucide 確保渲染絕對穩定 -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    
-    <!-- 4. 樣式：Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
@@ -25,112 +19,159 @@
             background-color: #020617; 
             color: #f8fafc; 
             margin: 0; 
-            -webkit-font-smoothing: antialiased;
         }
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
         
         @media print {
+            @page { size: A4; margin: 0.8cm; }
             .no-print { display: none !important; }
             body { background-color: white !important; color: black !important; }
-            .print-container { background-color: white !important; color: black !important; border: none !important; box-shadow: none !important; }
+            .print-container { background-color: white !important; padding: 0 !important; margin: 0 !important; }
+            .print-card {
+                border: 1px solid #ddd !important;
+                margin-bottom: 12px !important;
+                padding: 15px !important;
+                page-break-inside: avoid;
+                border-radius: 8px !important;
+            }
+            .print-title { font-size: 16pt !important; font-weight: bold !important; margin-bottom: 10px; }
+            .print-text { font-size: 12pt !important; line-height: 1.5 !important; }
+            .print-explanation { 
+                font-size: 12pt !important; 
+                background: #f4f4f5 !important; 
+                padding: 12px !important; 
+                margin-top: 12px !important;
+                border-left: 5px solid #f59e0b !important;
+                color: #18181b !important;
+            }
         }
         
-        .animate-fade-in { animation: fadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <!-- 必須使用 type="text/babel" 否則瀏覽器會看不懂 HTML 標籤 -->
     <script type="text/babel">
         // --- 教師核心設定區 ---
+        // 1. 您的 GAS URL (用於記錄成績與發信)
         const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybMG3mL2OgqX_i0ZeRexPy619ErLP_S9EjdLJbUw2-FjCFuJy2xqxzhPVlzuZ9wWUQdg/exec"; 
+        
+        // 2. 您的 Google 試算表發佈網址 (已更新為您的連結)
+        const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
+        
         const ADMIN_PASS = "153154";
+        const LOCAL_CSV_FALLBACK = "./test.csv"; 
         // --------------------
 
         const { useState, useEffect, useCallback, useRef } = React;
 
-        /**
-         * 穩定版圖標組件：直接調用全域 lucide 物件
-         */
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
-            
-            const renderIcon = useCallback(() => {
-                if (window.lucide && window.lucide.icons && window.lucide.icons[name]) {
-                    const svg = window.lucide.icons[name].toSvg({
-                        width: size,
-                        height: size,
-                        class: className
-                    });
+            const render = useCallback(() => {
+                if (window.lucide && window.lucide.icons[name]) {
+                    const svg = window.lucide.icons[name].toSvg({ width: size, height: size, class: className });
                     if (iconRef.current) iconRef.current.innerHTML = svg;
                 }
             }, [name, size, className]);
-
-            useEffect(() => {
-                renderIcon();
-                // 如果載入較慢，給予緩衝重試
-                const timer = setTimeout(renderIcon, 500);
-                return () => clearTimeout(timer);
-            }, [renderIcon]);
-
+            useEffect(() => { render(); }, [render]);
             return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+        };
+
+        const IMEInput = ({ value, onChange, placeholder, className, type = "text" }) => {
+            const [localValue, setLocalValue] = useState(value);
+            const isComposing = useRef(false);
+            const lastExternalValue = useRef(value);
+
+            useEffect(() => { 
+                if (!isComposing.current && value !== lastExternalValue.current) {
+                    setLocalValue(value);
+                    lastExternalValue.current = value;
+                }
+            }, [value]);
+
+            const handleCompositionStart = () => { isComposing.current = true; };
+            const handleCompositionEnd = (e) => {
+                isComposing.current = false;
+                setLocalValue(e.target.value);
+                lastExternalValue.current = e.target.value;
+                onChange(e.target.value);
+            };
+            const handleChange = (e) => {
+                setLocalValue(e.target.value);
+                if (!isComposing.current) {
+                    lastExternalValue.current = e.target.value;
+                    onChange(e.target.value);
+                }
+            };
+
+            return (
+                <input type={type} value={localValue} placeholder={placeholder} className={className}
+                    onChange={handleChange} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} autoComplete="off" />
+            );
         };
 
         const App = () => {
             const [view, setView] = useState('login');
-            const [studentInfo, setStudentInfo] = useState({ class: '', seat: '', name: '' });
+            const [studentInfo, setStudentInfo] = useState({ class: '', seat: '', name: '', email: '' });
             const [quizData, setQuizData] = useState([]);
-            const [quizName, setQuizName] = useState('未命名單元');
+            const [quizName, setQuizName] = useState('資料同步中...');
             const [answers, setAnswers] = useState({});
             const [results, setResults] = useState(null);
             const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [emailStatus, setEmailStatus] = useState('');
 
-            // 解析 CSV：支援您提供的 Tab (\t) 分隔格式
-            const handleFileUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setQuizName(file.name.replace('.csv', ''));
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const text = event.target.result;
-                    const rows = text.split(/\r?\n/).filter(line => line.trim() !== "");
-                    
-                    // 從第二行開始解析（跳過標題）
-                    const data = rows.slice(1).map(row => {
-                        const columns = row.split('\t'); // 關鍵：使用 Tab 分隔
-                        return {
-                            question: (columns[0] || "").replace(/^"|"$/g, '').trim(),
-                            answer: (columns[1] || "").trim(),
-                            explanation: (columns[2] || "").replace(/^"|"$/g, '').trim()
-                        };
-                    }).filter(item => item.question && item.answer);
-                    
-                    if (data.length === 0) {
-                        alert('解析失敗！請確認 CSV 是否使用「Tab (跳格)」分隔。');
-                        return;
-                    }
-                    
-                    setQuizData(data);
-                    alert(`成功載入「${quizName}」共 ${data.length} 題！`);
-                    setView('login');
-                };
-                reader.readAsText(file);
+            // 智慧型題目與選項拆解引擎
+            const processQuestionText = (rawText) => {
+                const optRegex = /[\(\（][A-D]|[Ａ-Ｄ][\)\）]/g;
+                const parts = rawText.split(optRegex);
+                if (parts && parts.length >= 5) {
+                    return {
+                        stem: parts[0].trim(),
+                        options: {
+                            'A': parts[1].trim(), 'B': parts[2].trim(), 'C': parts[3].trim(), 'D': parts[4].trim()
+                        },
+                        isParsed: true
+                    };
+                }
+                return { stem: rawText, options: null, isParsed: false };
             };
 
-            const handleSubmitQuiz = async () => {
-                if (Object.keys(answers).length < quizData.length) {
-                    if (!confirm('尚有題目未完成，確定要現在交卷嗎？')) return;
-                }
+            const parseCSV = (text) => {
+                const rows = text.split(/\r?\n/).filter(line => line.trim() !== "");
+                const delimiter = text.includes('\t') ? '\t' : ',';
+                
+                const data = rows.slice(1).map(row => {
+                    const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
+                    const rawQuestion = columns[0] || "";
+                    const parsed = processQuestionText(rawQuestion);
+                    return {
+                        ...parsed,
+                        answer: (columns[1] || "").toUpperCase().replace(/[ＡＢＣＤ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248)),
+                        explanation: columns[2] || ""
+                    };
+                }).filter(item => item.stem && item.answer);
+                setQuizData(data);
+            };
 
-                setIsSubmitting(true);
+            useEffect(() => {
+                const targetUrl = CLOUD_CSV_URL || LOCAL_CSV_FALLBACK;
+                fetch(targetUrl)
+                    .then(res => res.text())
+                    .then(text => {
+                        parseCSV(text);
+                        setQuizName(CLOUD_CSV_URL ? "已連結雲端題庫" : "使用本地備援題庫");
+                    })
+                    .catch(() => {
+                        setQuizName("尚未配置有效題庫");
+                    });
+            }, []);
+
+            const handleSubmitQuiz = async () => {
                 const scorePerQuestion = 100 / quizData.length;
                 let correctCount = 0;
-                
                 const detailResults = quizData.map((q, idx) => {
                     const studentAnswer = answers[idx] || '未答';
                     const isCorrect = studentAnswer === q.answer;
@@ -138,127 +179,109 @@
                     return { ...q, studentAnswer, isCorrect };
                 });
 
+                // 統計錯誤題號 (1-indexed)
+                const wrongIndices = detailResults
+                    .map((d, i) => d.isCorrect ? null : i + 1)
+                    .filter(n => n !== null)
+                    .join(', ');
+
                 const finalScore = Math.round(correctCount * scorePerQuestion);
                 const report = {
                     score: finalScore,
                     date: new Date().toLocaleString('zh-TW'),
-                    details: detailResults
+                    details: detailResults,
+                    wrongQuestions: wrongIndices || "全對"
                 };
                 
                 setResults(report);
                 setView('results');
 
-                // 回傳成績至 Google 試算表
-                if (GAS_WEB_APP_URL && GAS_WEB_APP_URL.startsWith("http")) {
+                // 回傳 GAS：包含班級、座號、姓名、成績、錯誤題號
+                if (GAS_WEB_APP_URL) {
                     fetch(GAS_WEB_APP_URL, {
                         method: 'POST',
                         mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            ...studentInfo,
-                            score: finalScore,
+                        body: JSON.stringify({ 
+                            ...studentInfo, 
+                            score: report.score,
                             date: report.date,
-                            wrongQuestions: detailResults.filter(d => !d.isCorrect).map(d => d.question).join('|')
+                            wrongQuestions: report.wrongQuestions,
+                            action: 'logScore' 
                         })
-                    }).catch(err => console.warn("GAS 傳送失敗，可能是網路問題", err));
+                    });
                 }
-                setIsSubmitting(false);
             };
 
-            // --- 視圖組件 ---
+            const sendRealEmail = async () => {
+                if (!studentInfo.email.includes('@')) return alert('信箱格式有誤');
+                setEmailStatus('正在發送...');
+                try {
+                    await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST', mode: 'no-cors',
+                        body: JSON.stringify({
+                            action: 'sendEmail', email: studentInfo.email, name: studentInfo.name,
+                            score: results.score, quizName, date: results.date,
+                            details: results.details.filter(d => !d.isCorrect).map(d => "題目：" + d.stem + "\n正確答案：" + d.answer).join('\n\n')
+                        })
+                    });
+                    setEmailStatus('寄送成功！');
+                } catch (e) { setEmailStatus('發送失敗。'); }
+            };
+
+            // --- UI 畫面 ---
 
             const LoginView = () => (
                 <div className="flex flex-col items-center justify-center min-h-[85vh] px-4 animate-fade-in">
-                    <div className="text-center mb-10">
-                        <div className="bg-amber-500/10 p-6 rounded-[2.5rem] inline-block mb-6 border border-amber-500/20 shadow-2xl">
-                            <Icon name="book-open" size={64} className="text-amber-500" />
-                        </div>
-                        <h1 className="text-4xl md:text-5xl font-black text-slate-100 mb-3 tracking-tight">國文科即時測驗系統</h1>
-                        <p className="text-slate-500 italic font-medium">「同是天涯淪落人，相逢何必曾相識」</p>
+                    <div className="text-center mb-8">
+                        <Icon name="database" size={56} className="text-amber-500 mb-4" />
+                        <h1 className="text-3xl font-black text-slate-100 mb-2 tracking-tight">國文科雲端即時測驗系統</h1>
+                        <p className="text-slate-500 italic text-sm">{quizName}</p>
                     </div>
 
-                    <div className="w-full max-w-md bg-slate-900/40 backdrop-blur-2xl p-8 rounded-[3rem] border border-slate-800 shadow-2xl">
-                        <div className="space-y-6">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3 block ml-1">班級資訊</label>
-                                <input placeholder="例如：101" className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl px-6 py-4 text-slate-100 focus:border-amber-500 outline-none transition-all placeholder:text-slate-700" value={studentInfo.class} onChange={e => setStudentInfo({...studentInfo, class: e.target.value})} />
-                            </div>
+                    <div className="w-full max-w-md bg-slate-900/60 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl">
+                        <div className="space-y-5">
+                            <IMEInput placeholder="班級 (如 101)" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none transition-all" value={studentInfo.class} onChange={val => setStudentInfo({...studentInfo, class: val})} />
                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3 block ml-1">座號</label>
-                                    <input placeholder="01" className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl px-6 py-4 text-slate-100 focus:border-amber-500 outline-none transition-all placeholder:text-slate-700" value={studentInfo.seat} onChange={e => setStudentInfo({...studentInfo, seat: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3 block ml-1">姓名</label>
-                                    <input placeholder="王小明" className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl px-6 py-4 text-slate-100 focus:border-amber-500 outline-none transition-all placeholder:text-slate-700" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} />
-                                </div>
+                                <IMEInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onChange={val => setStudentInfo({...studentInfo, seat: val})} />
+                                <IMEInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onChange={val => setStudentInfo({...studentInfo, name: val})} />
                             </div>
-                            <button 
-                                onClick={() => quizData.length > 0 ? setView('quiz') : alert('目前無題庫，請先由管理模式匯入題目')} 
-                                className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-black py-5 rounded-2xl mt-4 transition-all shadow-xl shadow-amber-900/30 active:scale-[0.98] text-lg"
-                            >
-                                開始測驗
-                            </button>
+                            <button onClick={() => quizData.length > 0 ? setView('quiz') : alert('等待題庫載入中...')} className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-black py-4 rounded-xl mt-4 shadow-xl active:scale-95 transition-all text-lg">開始測驗</button>
                         </div>
                     </div>
-                    
-                    <button onClick={() => setView('admin')} className="mt-12 text-slate-600 hover:text-slate-400 text-sm flex items-center gap-2 transition-colors font-bold uppercase tracking-widest">
-                        <Icon name="settings" size={16} /> Admin Mode
-                    </button>
                 </div>
             );
 
             const QuizView = () => {
                 const q = quizData[currentQuestionIndex];
                 return (
-                    <div className="max-w-3xl mx-auto py-10 px-4 animate-fade-in">
-                        <div className="flex justify-between items-end mb-10">
-                            <div>
-                                <h2 className="text-3xl font-black text-amber-500 tracking-tight">{quizName}</h2>
-                                <div className="h-2 w-20 bg-amber-600 mt-2 rounded-full"></div>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-slate-500 font-mono text-sm mb-1 uppercase tracking-[0.2em]">Question {currentQuestionIndex + 1} / {quizData.length}</p>
-                                <div className="w-40 bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-800 shadow-inner">
-                                    <div className="h-full bg-amber-500 transition-all duration-700 ease-out" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div>
-                                </div>
-                            </div>
+                    <div className="max-w-2xl mx-auto py-10 px-4 animate-fade-in">
+                        <div className="flex justify-between items-end mb-6">
+                            <h2 className="text-xl font-bold text-amber-500">Unit: {quizName}</h2>
+                            <p className="text-slate-500 font-mono text-xs uppercase tracking-widest">{currentQuestionIndex + 1} / {quizData.length}</p>
                         </div>
-
-                        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 p-10 md:p-16 rounded-[3.5rem] shadow-2xl min-h-[500px] flex flex-col justify-between relative overflow-hidden">
-                            <div className="absolute -top-10 -right-10 opacity-5 rotate-12"><Icon name="book" size={200}/></div>
+                        <div className="bg-slate-900 border border-slate-800 p-8 md:p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden min-h-[500px] flex flex-col justify-between">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
+                                <div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div>
+                            </div>
                             
-                            <div className="relative z-10">
-                                <h3 className="text-2xl md:text-3xl font-bold mb-14 leading-relaxed text-slate-100">
-                                    「{q.question}」
-                                </h3>
-                                
-                                <div className="grid grid-cols-1 gap-5">
+                            <div>
+                                <h3 className="text-xl md:text-2xl font-bold mb-10 leading-relaxed text-slate-100 italic">「{q.stem}」</h3>
+                                <div className="grid grid-cols-1 gap-4">
                                     {['A', 'B', 'C', 'D'].map(opt => (
                                         <button key={opt} onClick={() => setAnswers({...answers, [currentQuestionIndex]: opt})}
-                                            className={`group p-6 rounded-2xl border text-left flex items-center gap-6 transition-all ${
-                                                answers[currentQuestionIndex] === opt 
-                                                ? 'bg-amber-500 border-amber-500 text-slate-950 font-black scale-[1.02] shadow-2xl shadow-amber-500/20' 
-                                                : 'bg-slate-950/50 border-slate-800 text-slate-400 hover:bg-slate-800 hover:border-slate-700'
-                                            }`}
-                                        >
-                                            <span className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black transition-colors ${
-                                                answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900 text-slate-600'
-                                            }`}>{opt}</span>
-                                            <span className="text-xl">選取選項 {opt}</span>
+                                            className={`group p-5 rounded-2xl border text-left flex items-start gap-4 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-bold scale-[1.01]' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
+                                            <span className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900'}`}>{opt}</span>
+                                            <span className="text-lg leading-snug">{q.options ? q.options[opt] : `選取選項 ${opt}`}</span>
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                            
-                            <div className="flex justify-between mt-16 pt-10 border-t border-slate-800/50 relative z-10">
-                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(prev => prev-1)} className="flex items-center gap-3 text-slate-500 hover:text-white disabled:opacity-0 transition-colors font-black uppercase tracking-widest text-sm">
-                                    <Icon name="chevron-left" size={20}/> Prev
-                                </button>
-                                
+
+                            <div className="flex justify-between mt-12 pt-6 border-t border-slate-800/50">
+                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(prev => prev-1)} className="flex items-center gap-1 text-slate-500 hover:text-white disabled:opacity-0 transition-all font-bold text-sm"><Icon name="chevron-left" size={16}/> Prev</button>
                                 {currentQuestionIndex === quizData.length - 1 
-                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 hover:bg-green-500 px-14 py-4 rounded-2xl font-black text-white shadow-xl shadow-green-900/30 active:scale-95 transition-all text-xl">交卷結算</button>
-                                    : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="bg-slate-800 hover:bg-slate-700 text-amber-500 px-14 py-4 rounded-2xl font-black transition-all flex items-center gap-2 text-xl">下一題 <Icon name="chevron-right" size={20}/></button>}
+                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 hover:bg-green-500 px-10 py-3 rounded-xl font-black text-white shadow-lg active:scale-95 transition-all text-lg">交卷結算</button>
+                                    : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">Next <Icon name="chevron-right" size={16}/></button>}
                             </div>
                         </div>
                     </div>
@@ -266,128 +289,63 @@
             }
 
             const ResultsView = () => (
-                <div className="max-w-4xl mx-auto py-10 px-4 animate-fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-[3.5rem] overflow-hidden shadow-2xl print-container">
-                        <div className="bg-gradient-to-br from-amber-500 to-orange-700 p-16 text-center relative no-print overflow-hidden">
-                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-from)_0%,_transparent_70%)] opacity-30"></div>
-                            <div className="relative z-10">
-                                <Icon name="trophy" size={80} className="mx-auto text-amber-100 mb-6 drop-shadow-2xl" />
-                                <h2 className="text-8xl font-black text-slate-950 mb-4 tracking-tighter drop-shadow-sm">{results.score}</h2>
-                                <p className="text-slate-950 font-black tracking-[0.5em] uppercase text-xs opacity-80">Quiz Performance</p>
-                            </div>
+                <div className="max-w-4xl mx-auto py-10 px-4 animate-fade-in print-container">
+                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
+                        <div className="bg-amber-600 p-10 text-center no-print">
+                            <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
+                            <p className="text-slate-950 font-bold tracking-[0.3em] mt-2 uppercase text-xs">Points Total</p>
                         </div>
-                        <div className="p-10 md:p-16">
-                            <div className="flex flex-col md:flex-row gap-5 mb-16 no-print">
-                                <button onClick={() => window.print()} className="flex-1 bg-slate-800 hover:bg-slate-700 py-5 rounded-2xl font-black flex items-center justify-center gap-4 border border-slate-700 transition-all shadow-lg active:scale-95">
-                                    <Icon name="download" size={22}/> 列印成果單 (存為 PDF)
-                                </button>
-                                <button onClick={() => alert('此功能僅為模擬。您可以點擊下載 PDF 後自行寄出！')} className="flex-1 bg-slate-800 hover:bg-slate-700 py-5 rounded-2xl font-black flex items-center justify-center gap-4 border border-slate-700 transition-all shadow-lg active:scale-95 opacity-50">
-                                    <Icon name="mail" size={22}/> 寄送至 Gmail
-                                </button>
+                        
+                        <div className="p-8 md:p-14">
+                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800 mb-10 no-print">
+                                <h4 className="text-amber-500 font-bold mb-4 flex items-center gap-2 tracking-wide"><Icon name="mail" size={20}/> 寄送測驗分析報告</h4>
+                                <div className="flex gap-4">
+                                    <IMEInput type="email" placeholder="輸入 Gmail 帳號" className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3 text-slate-100 outline-none" value={studentInfo.email} onChange={val => setStudentInfo({...studentInfo, email: val})} />
+                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-8 py-3 rounded-2xl active:scale-95 transition-all shadow-lg">發送</button>
+                                </div>
+                                {emailStatus && <p className="text-xs mt-3 text-slate-500 italic">{emailStatus}</p>}
                             </div>
-                            
-                            <h3 className="text-2xl font-black text-slate-100 uppercase tracking-widest flex items-center gap-4 mb-12">
-                                <div className="w-2.5 h-10 bg-amber-500 rounded-full"></div>
-                                答題詳情與錯誤解析
-                            </h3>
-                            
-                            <div className="space-y-10">
+
+                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold flex items-center justify-center gap-3 no-print border border-slate-700">
+                                <Icon name="download" size={20}/> 列印或儲存成果報告單
+                            </button>
+
+                            <div className="print-title hidden print:block text-center border-b-2 border-black pb-2 mb-6 uppercase tracking-widest">
+                                Quiz Report: {studentInfo.name} ({results.score} Pts)
+                            </div>
+
+                            <div className="space-y-6">
                                 {results.details.map((item, idx) => (
-                                    <div key={idx} className={`p-8 md:p-12 rounded-[3rem] border transition-all ${item.isCorrect ? 'border-green-500/10 bg-green-500/5' : 'border-red-500/10 bg-red-500/5'}`}>
-                                        <div className="flex justify-between items-start gap-8 mb-10">
-                                            <p className="text-slate-100 text-xl md:text-2xl font-medium leading-relaxed">
-                                                <span className="text-slate-700 font-black mr-4 font-mono text-lg tracking-tighter">QUESTION {idx+1}</span>
-                                                {item.question}
+                                    <div key={idx} className={`print-card p-8 rounded-[2rem] border ${item.isCorrect ? 'border-green-500/10 bg-green-500/5' : 'border-red-500/10 bg-red-500/5'}`}>
+                                        <div className="flex justify-between items-start gap-4 mb-4">
+                                            <p className="print-text text-slate-100 text-xl md:text-2xl font-medium leading-relaxed">
+                                                <span className="text-slate-600 font-mono mr-2 text-sm">#{idx+1}</span>{item.stem}
                                             </p>
-                                            <div className="shrink-0 mt-2">
-                                                {item.isCorrect 
-                                                  ? <Icon name="check-circle" className="text-green-500" size={36} /> 
-                                                  : <Icon name="x-circle" className="text-red-500" size={36} />
-                                                }
-                                            </div>
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800/50">
-                                                <span className="text-[10px] font-black text-slate-600 uppercase block mb-3 tracking-widest">您的回答 / Choice</span>
-                                                <span className={`text-3xl font-black ${item.isCorrect ? 'text-green-400' : 'text-red-400'}`}>{item.studentAnswer}</span>
-                                            </div>
-                                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800/50">
-                                                <span className="text-[10px] font-black text-slate-600 uppercase block mb-3 tracking-widest">正確答案 / Correct</span>
-                                                <span className="text-3xl font-black text-green-400">{item.answer}</span>
-                                            </div>
+                                        <div className="flex gap-6 text-sm font-bold mb-4">
+                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>學生作答：{item.studentAnswer}</span>
+                                            <span className="text-green-400">正確答案：{item.answer}</span>
                                         </div>
                                         {!item.isCorrect && (
-                                            <div className="text-slate-400 bg-slate-950/80 p-8 md:p-10 rounded-[2.5rem] border border-slate-800/50 leading-relaxed relative overflow-hidden">
-                                                <div className="absolute top-0 left-0 w-2 h-full bg-amber-500"></div>
-                                                <span className="text-amber-500 font-black block mb-4 uppercase text-[10px] tracking-widest flex items-center gap-2">
-                                                   <Icon name="alert-circle" size={14}/> 詳解說明 / Explanation
-                                                </span>
-                                                <p className="text-xl italic font-medium leading-loose">「{item.explanation}」</p>
+                                            <div className="print-explanation text-xl md:text-2xl text-slate-200 leading-relaxed italic border-t border-slate-800/60 pt-5 mt-5 bg-slate-950/40 p-5 rounded-2xl">
+                                                <span className="text-amber-500 not-italic font-black block mb-2 uppercase tracking-widest text-xs">詳解解析 / Review</span>
+                                                「{item.explanation}」
                                             </div>
                                         )}
                                     </div>
                                 ))}
                             </div>
-                            <button onClick={() => window.location.reload()} className="w-full mt-20 py-8 text-slate-600 hover:text-amber-500 transition-colors font-black border-t border-slate-900 pt-10 uppercase tracking-[0.4em] text-xs no-print flex items-center justify-center gap-2">
-                                <Icon name="log-out" size={16} /> 返回測驗登入首頁
-                            </button>
+                            <button onClick={() => window.location.reload()} className="w-full mt-16 py-8 text-slate-700 hover:text-amber-500 font-black border-t border-slate-900 pt-10 no-print text-[10px] uppercase tracking-[0.4em]">End Session</button>
                         </div>
                     </div>
                 </div>
             );
-
-            const AdminView = () => {
-                const [p, setP] = useState('');
-                const [auth, setAuth] = useState(false);
-                
-                if (!auth) return (
-                    <div className="max-w-md mx-auto py-32 text-center px-6 animate-fade-in">
-                        <div className="bg-slate-900/80 p-6 rounded-full inline-block mb-10 border border-slate-800 shadow-2xl">
-                            <Icon name="lock" className="w-12 h-12 text-slate-700" />
-                        </div>
-                        <h2 className="text-3xl font-black mb-10 text-slate-100 tracking-tighter">教師身分驗證</h2>
-                        <input type="password" placeholder="輸入管理密碼 (153154)" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl mb-6 outline-none focus:border-amber-500 transition-colors text-center text-xl text-slate-100 placeholder:text-slate-800" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && p === ADMIN_PASS && setAuth(true)} />
-                        <button onClick={() => p === ADMIN_PASS ? setAuth(true) : alert('密碼錯誤，請重新輸入')} className="w-full bg-amber-600 p-5 rounded-2xl font-black text-slate-950 active:scale-95 transition-all shadow-xl shadow-amber-900/20 text-lg">驗證權限</button>
-                        <button onClick={() => setView('login')} className="mt-8 text-slate-700 hover:text-slate-500 font-bold transition-colors">取消並返回</button>
-                    </div>
-                );
-                
-                return (
-                    <div className="max-w-2xl mx-auto py-10 px-6 animate-fade-in">
-                        <div className="bg-slate-900 border border-slate-800 p-12 rounded-[3.5rem] shadow-2xl">
-                            <h2 className="text-3xl font-black mb-12 flex items-center gap-4 text-slate-100 tracking-tighter">
-                                <Icon name="settings" className="text-amber-500" /> 題庫管理中心
-                            </h2>
-                            <div className="bg-slate-950 border-2 border-dashed border-slate-800 p-16 text-center rounded-[3rem] group hover:border-amber-500/50 transition-all cursor-pointer relative overflow-hidden">
-                                <div className="absolute inset-0 bg-amber-500/0 group-hover:bg-amber-500/5 transition-colors"></div>
-                                <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer z-10" title=" " />
-                                <Icon name="upload" className="mx-auto text-slate-700 group-hover:text-amber-500 transition-all mb-8" size={72} />
-                                <p className="text-slate-300 font-black mb-3 text-2xl tracking-tight">點擊或拖放題庫 CSV</p>
-                                <p className="text-slate-600 text-sm font-medium italic">目前載入單元：{quizName}</p>
-                            </div>
-                            <div className="mt-12 bg-slate-950 rounded-[2.5rem] p-8 border border-slate-800">
-                                <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-[0.4em] mb-8 border-b border-slate-900/50 pb-5">題庫內容預覽 (Total: {quizData.length})</h4>
-                                <div className="space-y-4 max-h-64 overflow-y-auto custom-scroll pr-4">
-                                    {quizData.map((q, i) => (
-                                        <div key={i} className="text-sm text-slate-600 truncate border-b border-slate-900/30 pb-4 flex items-center gap-4">
-                                            <span className="text-amber-500 font-black font-mono w-8 text-xs">#{i+1}</span> {q.question}
-                                        </div>
-                                    ))}
-                                    {quizData.length === 0 && <p className="text-slate-800 italic text-center py-12 uppercase tracking-widest text-xs">Waiting for CSV upload...</p>}
-                                </div>
-                            </div>
-                            <button onClick={() => setView('login')} className="w-full mt-12 bg-slate-800 hover:bg-slate-700 p-5 rounded-2xl font-black transition-all text-slate-200 shadow-xl border border-slate-700">完成設定</button>
-                        </div>
-                    </div>
-                );
-            }
 
             return (
                 <div className="min-h-screen">
                     {view === 'login' && <LoginView />}
                     {view === 'quiz' && <QuizView />}
                     {view === 'results' && <ResultsView />}
-                    {view === 'admin' && <AdminView />}
                 </div>
             );
         };
