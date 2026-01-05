@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>國文科即時測驗系統 Pro (雲端同步終極版)</title>
+    <title>國文科即時測驗系統 Pro</title>
     
     <!-- 基礎環境 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -19,37 +19,36 @@
             background-color: #020617; 
             color: #f8fafc; 
             margin: 0; 
-            overflow-x: hidden;
         }
         
+        /* 極簡文字檔 PDF 列印樣式 */
         @media print {
-            @page { size: A4; margin: 0.8cm; }
+            @page { size: A4; margin: 2cm; }
             .no-print { display: none !important; }
             body { background-color: white !important; color: black !important; }
-            .print-container { background-color: white !important; padding: 0 !important; margin: 0 !important; }
+            .print-container { background-color: white !important; padding: 0 !important; margin: 0 !important; width: 100% !important; }
             .print-card {
-                border: 1px solid #ddd !important;
-                margin-bottom: 12px !important;
-                padding: 15px !important;
+                border: none !important;
+                border-bottom: 0.5pt solid #000 !important;
+                margin-bottom: 12pt !important;
+                padding: 0 0 10pt 0 !important;
                 page-break-inside: avoid;
-                border-radius: 8px !important;
             }
-            .print-title { font-size: 16pt !important; font-weight: bold !important; margin-bottom: 10px; }
-            .print-text { font-size: 12pt !important; line-height: 1.5 !important; }
+            .print-header { border-bottom: 1.5pt solid black !important; margin-bottom: 20pt !important; padding-bottom: 10pt !important; }
+            .print-title { font-size: 18pt !important; font-weight: bold !important; margin-bottom: 8pt !important; }
+            .print-text { font-size: 11pt !important; line-height: 1.5 !important; color: black !important; }
+            .print-meta { font-size: 11pt !important; margin-bottom: 5pt !important; }
             .print-explanation { 
-                font-size: 12pt !important; 
-                background: #f4f4f5 !important; 
-                padding: 12px !important; 
-                margin-top: 12px !important;
-                border-left: 5px solid #f59e0b !important;
-                color: #18181b !important;
+                font-size: 10pt !important; 
+                margin-top: 5pt !important;
+                border-left: 2pt solid #333 !important;
+                padding-left: 10pt !important;
+                color: #333 !important;
             }
         }
         
-        .custom-scroll::-webkit-scrollbar { width: 5px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        .animate-fade-in { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -67,41 +66,39 @@
 
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
-            const render = useCallback(() => {
+            useEffect(() => {
                 if (window.lucide && window.lucide.icons[name]) {
                     const svg = window.lucide.icons[name].toSvg({ width: size, height: size, class: className });
                     if (iconRef.current) iconRef.current.innerHTML = svg;
                 }
             }, [name, size, className]);
-            useEffect(() => { render(); }, [render]);
             return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
         };
 
         /**
-         * 極致穩定版 Input：將更新頻率降至最低，徹底解決跳動問題
+         * 終極解決跳動方案：完全獨立的本地狀態輸入框
          */
-        const IMEInput = ({ value, onChange, placeholder, className, type = "text" }) => {
-            const [innerValue, setInnerValue] = useState(value || '');
-            const isComposing = useRef(false);
-
+        const FinalSafeInput = ({ value, onFinalChange, placeholder, className, type = "text" }) => {
+            const [temp, setTemp] = useState(value || '');
+            
+            // 只有在外部初始載入時同步一次
             useEffect(() => {
-                if (!isComposing.current) setInnerValue(value || '');
+                if (value !== temp) setTemp(value || '');
             }, [value]);
 
-            const handleChange = (e) => {
-                setInnerValue(e.target.value);
-                if (!isComposing.current) onChange(e.target.value);
+            const commit = () => {
+                onFinalChange(temp);
             };
 
             return (
                 <input 
-                    type={type} value={innerValue} placeholder={placeholder} className={className}
-                    onChange={handleChange}
-                    onCompositionStart={() => { isComposing.current = true; }}
-                    onCompositionEnd={(e) => {
-                        isComposing.current = false;
-                        onChange(e.target.value);
-                    }}
+                    type={type} 
+                    value={temp} 
+                    placeholder={placeholder} 
+                    className={className}
+                    onChange={(e) => setTemp(e.target.value)}
+                    onBlur={commit}
+                    onKeyDown={(e) => e.key === 'Enter' && commit()}
                     autoComplete="off"
                 />
             );
@@ -111,14 +108,14 @@
             const [view, setView] = useState('login');
             const [studentInfo, setStudentInfo] = useState({ class: '', seat: '', name: '', email: '' });
             const [quizData, setQuizData] = useState([]);
-            const [quizName, setQuizName] = useState('資料載入中...');
+            const [quizName, setQuizName] = useState('載入中...');
             const [answers, setAnswers] = useState({});
             const [results, setResults] = useState(null);
             const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
             const [emailStatus, setEmailStatus] = useState('');
 
-            // 改進的正則：精準匹配 (A) 或 （Ａ）
             const processQuestionText = useCallback((rawText) => {
+                // 優化正則：精準抓取並移除 (A) (B) (C) (D) 或全形版本
                 const optRegex = /\s*[\(\（][A-DＡ-Ｄ][\)\）]\s*/g;
                 const parts = rawText.split(optRegex);
                 if (parts && parts.length >= 5) {
@@ -136,7 +133,6 @@
             const parseCSV = useCallback((text) => {
                 const rows = text.split(/\r?\n/).filter(line => line.trim() !== "");
                 const delimiter = text.includes('\t') ? '\t' : ',';
-                
                 const data = rows.slice(1).map(row => {
                     const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
                     const rawQuestion = columns[0] || "";
@@ -151,14 +147,13 @@
             }, [processQuestionText]);
 
             useEffect(() => {
-                const targetUrl = CLOUD_CSV_URL || LOCAL_CSV_FALLBACK;
-                fetch(targetUrl)
+                fetch(CLOUD_CSV_URL || LOCAL_CSV_FALLBACK)
                     .then(res => res.text())
                     .then(text => {
                         parseCSV(text);
-                        setQuizName(CLOUD_CSV_URL ? "雲端題庫已連線" : "本地備援題庫");
+                        setQuizName("國文科專測單元");
                     })
-                    .catch(() => setQuizName("題庫載入失敗"));
+                    .catch(() => setQuizName("連線失敗"));
             }, [parseCSV]);
 
             const handleSubmitQuiz = async () => {
@@ -171,21 +166,17 @@
                     return { ...q, studentAnswer, isCorrect };
                 });
 
-                const wrongIndices = detailResults
-                    .map((d, i) => d.isCorrect ? null : i + 1)
-                    .filter(n => n !== null)
-                    .join(', ');
-
+                const wrongIndices = detailResults.map((d, i) => d.isCorrect ? null : i + 1).filter(n => n !== null).join(', ');
                 const report = {
                     score: Math.round(correctCount * scorePerQuestion),
                     date: new Date().toLocaleString('zh-TW'),
                     details: detailResults,
                     wrongQuestions: wrongIndices || "全對"
                 };
-                
                 setResults(report);
                 setView('results');
 
+                // 自動傳送 GAS 記錄成績
                 if (GAS_WEB_APP_URL) {
                     fetch(GAS_WEB_APP_URL, {
                         method: 'POST',
@@ -196,43 +187,45 @@
             };
 
             const sendRealEmail = async () => {
-                if (!studentInfo.email.includes('@')) return alert('信箱格式有誤');
-                setEmailStatus('正在請求發信...');
+                if (!studentInfo.email.includes('@')) return alert('Email 格式有誤');
+                setEmailStatus('正在發送...');
                 try {
                     await fetch(GAS_WEB_APP_URL, {
-                        method: 'POST', 
+                        method: 'POST',
                         mode: 'no-cors',
                         body: JSON.stringify({
-                            action: 'sendEmail', 
-                            email: studentInfo.email, 
+                            action: 'sendEmail',
+                            email: studentInfo.email,
                             name: studentInfo.name,
-                            score: results.score, 
-                            quizName, 
+                            score: results.score,
+                            quizName,
                             date: results.date,
-                            details: results.details.filter(d => !d.isCorrect).map(d => `題號：${results.details.indexOf(d)+1}\n題目：${d.stem}\n正確答案：${d.answer}`).join('\n\n')
+                            details: results.details.filter(d => !d.isCorrect).map((d, idx) => `題號：${results.details.indexOf(d)+1}\n題目：${d.stem}\n正確答案：${d.answer}`).join('\n\n')
                         })
                     });
-                    setEmailStatus('指令已送出！請檢查 Gmail 信箱。');
-                } catch (e) { setEmailStatus('發信失敗。'); }
+                    setEmailStatus('信件已進入寄送流程，請檢查 Gmail 收件匣。');
+                } catch (e) {
+                    setEmailStatus('連線 GAS 伺服器失敗。');
+                }
             };
 
-            // --- 視圖 ---
+            // --- Views ---
 
             const LoginView = () => (
                 <div className="flex flex-col items-center justify-center min-h-[85vh] px-4 animate-fade-in">
                     <div className="text-center mb-10">
-                        <Icon name="database" size={56} className="text-amber-500 mb-4" />
-                        <h1 className="text-4xl font-black text-slate-100 mb-2">國文科雲端即時測驗系統</h1>
+                        <Icon name="book" size={56} className="text-amber-500 mb-4" />
+                        <h1 className="text-3xl font-black text-slate-100 mb-2">國文科雲端即時測驗</h1>
                         <p className="text-slate-500 italic text-sm">{quizName}</p>
                     </div>
                     <div className="w-full max-w-md bg-slate-900/60 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl">
                         <div className="space-y-6">
-                            <IMEInput placeholder="班級 (如 101)" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3.5 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.class} onChange={val => setStudentInfo(p => ({...p, class: val}))} />
+                            <FinalSafeInput placeholder="班級" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.class} onFinalChange={v => setStudentInfo({...studentInfo, class: v})} />
                             <div className="grid grid-cols-2 gap-4">
-                                <IMEInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3.5 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onChange={val => setStudentInfo(p => ({...p, seat: val}))} />
-                                <IMEInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3.5 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onChange={val => setStudentInfo(p => ({...p, name: val}))} />
+                                <FinalSafeInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onFinalChange={v => setStudentInfo({...studentInfo, seat: v})} />
+                                <FinalSafeInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onFinalChange={v => setStudentInfo({...studentInfo, name: v})} />
                             </div>
-                            <button onClick={() => quizData.length > 0 ? setView('quiz') : alert('題庫載入中...')} className="w-full bg-amber-600 text-slate-950 font-black py-4.5 rounded-2xl mt-4 shadow-xl active:scale-95 transition-all text-lg">開始測驗</button>
+                            <button onClick={() => quizData.length > 0 ? setView('quiz') : alert('載入中...')} className="w-full bg-amber-600 text-slate-950 font-black py-4 rounded-xl mt-4 active:scale-95 transition-all text-lg">進入測驗</button>
                         </div>
                     </div>
                 </div>
@@ -242,31 +235,30 @@
                 const q = quizData[currentQuestionIndex];
                 return (
                     <div className="max-w-3xl mx-auto py-10 px-4 animate-fade-in">
-                        <div className="flex justify-between items-end mb-8 px-2">
-                            <h2 className="text-2xl font-black text-amber-500">{quizName}</h2>
-                            <p className="text-slate-500 font-mono text-sm uppercase tracking-widest">{currentQuestionIndex + 1} / {quizData.length}</p>
+                        <div className="flex justify-between items-end mb-6">
+                            <h2 className="text-xl font-bold text-amber-500">{quizName}</h2>
+                            <p className="text-slate-500 font-mono text-xs uppercase">{currentQuestionIndex + 1} / {quizData.length}</p>
                         </div>
-                        <div className="bg-slate-900 border border-slate-800 p-8 md:p-14 rounded-[3rem] shadow-2xl relative overflow-hidden min-h-[550px] flex flex-col justify-between">
-                            <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
-                                <div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div>
-                            </div>
+                        <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] shadow-2xl min-h-[500px] flex flex-col justify-between">
                             <div>
-                                <h3 className="text-2xl md:text-3xl font-bold mb-12 leading-relaxed text-slate-100 italic">「{q.stem}」</h3>
-                                <div className="grid grid-cols-1 gap-5">
+                                <h3 className="text-2xl md:text-3xl font-bold mb-10 leading-relaxed text-slate-100 italic">
+                                    {currentQuestionIndex + 1}. 「{q.stem}」
+                                </h3>
+                                <div className="grid grid-cols-1 gap-4">
                                     {['A', 'B', 'C', 'D'].map(opt => (
                                         <button key={opt} onClick={() => setAnswers({...answers, [currentQuestionIndex]: opt})}
-                                            className={`group p-6 rounded-2xl border text-left flex items-start gap-5 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-black scale-[1.01]' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
-                                            <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center font-black text-lg ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900 text-slate-600'}`}>{opt}</span>
-                                            <span className="text-xl leading-snug">{q.options ? q.options[opt] : `選項 ${opt}`}</span>
+                                            className={`p-5 rounded-2xl border text-left flex items-start gap-4 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
+                                            <span className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900'}`}>{opt}</span>
+                                            <span className="text-lg leading-snug">{q.options ? q.options[opt] : `選項 ${opt}`}</span>
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                            <div className="flex justify-between mt-16 pt-8 border-t border-slate-800/50">
-                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(prev => prev-1)} className="text-slate-600 hover:text-white disabled:opacity-0 transition-all font-black uppercase text-xs tracking-widest"><Icon name="chevron-left" size={16}/> Prev</button>
+                            <div className="flex justify-between mt-12 pt-6 border-t border-slate-800/50">
+                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0"><Icon name="chevron-left" size={16}/> 上一題</button>
                                 {currentQuestionIndex === quizData.length - 1 
-                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-12 py-3.5 rounded-2xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">交卷結算</button>
-                                    : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="text-amber-500 font-black flex items-center gap-2 hover:translate-x-1 transition-transform uppercase text-xs">Next <Icon name="chevron-right" size={16}/></button>}
+                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-10 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">交卷</button>
+                                    : <button onClick={() => setCurrentQuestionIndex(p => p+1)} className="text-amber-500 font-bold flex items-center gap-1">下一題 <Icon name="chevron-right" size={16}/></button>}
                             </div>
                         </div>
                     </div>
@@ -275,53 +267,55 @@
 
             const ResultsView = () => (
                 <div className="max-w-4xl mx-auto py-10 px-4 animate-fade-in print-container">
-                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                        <div className="bg-amber-600 p-12 text-center no-print">
-                            <h2 className="text-8xl font-black text-slate-950">{results.score}</h2>
-                            <p className="text-slate-950 font-black tracking-[0.5em] mt-2 uppercase text-xs">Total Score</p>
+                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl print:shadow-none print:border-none">
+                        <div className="bg-amber-600 p-10 text-center no-print">
+                            <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
+                            <p className="text-slate-950 font-bold uppercase text-xs">Final Score</p>
                         </div>
-                        <div className="p-10 md:p-16">
-                            <div className="bg-slate-950/50 p-8 rounded-[2rem] border border-slate-800 mb-12 no-print">
-                                <h4 className="text-amber-500 font-black mb-5 flex items-center gap-3 tracking-widest uppercase text-sm"><Icon name="mail" size={20}/> 寄送正式分析報告至 Gmail</h4>
-                                <div className="flex gap-4">
-                                    <IMEInput type="email" placeholder="請輸入您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl px-6 py-4 text-slate-100 outline-none focus:border-amber-500" value={studentInfo.email} onChange={val => setStudentInfo(p => ({...p, email: val}))} />
-                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-10 py-4 rounded-2xl active:scale-95 shadow-xl">發送</button>
+                        <div className="p-10 md:p-16 print:p-0">
+                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800 mb-10 no-print">
+                                <h4 className="text-amber-500 font-bold mb-4 flex items-center gap-2"><Icon name="mail" size={18}/> 寄送測驗分析至 Gmail</h4>
+                                <div className="flex gap-3">
+                                    <FinalSafeInput placeholder="您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 outline-none" value={studentInfo.email} onFinalChange={v => setStudentInfo({...studentInfo, email: v})} />
+                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-8 py-3 rounded-xl active:scale-95">發送</button>
                                 </div>
-                                {emailStatus && <p className="text-xs mt-4 text-slate-500 italic">{emailStatus}</p>}
+                                {emailStatus && <p className="text-xs mt-3 text-slate-500 italic">{emailStatus}</p>}
                             </div>
 
-                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-5 rounded-2xl mb-14 font-black flex items-center justify-center gap-4 no-print border border-slate-700 transition-all shadow-lg active:scale-95">
-                                <Icon name="download" size={22}/> 列印或儲存精簡成果單 (PDF)
+                            <button onClick={() => window.print()} className="w-full bg-slate-800 py-3 rounded-xl mb-12 font-bold no-print border border-slate-700">
+                                <Icon name="download" size={18}/> 列印或下載成果報告單 (PDF)
                             </button>
 
-                            <div className="print-title hidden print:block text-center border-b-2 border-black pb-3 mb-8 font-black text-2xl">國文測驗成果分析：{studentInfo.name} ({results.score}分)</div>
+                            {/* 列印專用內容 */}
+                            <div className="hidden print:block print-header">
+                                <div className="print-title">國文測驗成果分析報告</div>
+                                <div className="print-meta">
+                                    姓名：{studentInfo.name} ({studentInfo.class}班 {studentInfo.seat}號)<br />
+                                    測驗：{quizName} | 日期：{results.date}<br />
+                                    總分：{results.score} 分
+                                </div>
+                            </div>
 
-                            <div className="space-y-8">
+                            <div className="space-y-6">
                                 {results.details.map((item, idx) => (
-                                    <div key={idx} className={`print-card p-10 rounded-[2.5rem] border transition-all ${item.isCorrect ? 'border-green-500/10 bg-green-500/5' : 'border-red-500/10 bg-red-500/5'}`}>
+                                    <div key={idx} className="print-card p-6 border border-slate-800 print:border-none print:p-0">
                                         <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4">
-                                            <span className="text-slate-700 font-mono mr-3 text-sm tracking-tighter uppercase">Q {idx+1}</span>{item.stem}
+                                            Q{idx+1}. {item.stem}
                                         </p>
-                                        <div className="grid grid-cols-2 gap-5 mb-6">
-                                            <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800/50">
-                                                <span className="text-[10px] font-black text-slate-600 uppercase block mb-2 tracking-widest">您的回答</span>
-                                                <span className={`text-2xl font-black ${item.isCorrect ? 'text-green-400' : 'text-red-400'}`}>{item.studentAnswer}</span>
-                                            </div>
-                                            <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800/50">
-                                                <span className="text-[10px] font-black text-slate-600 uppercase block mb-2 tracking-widest">正確答案</span>
-                                                <span className="text-2xl font-black text-green-400">{item.answer}</span>
-                                            </div>
+                                        <div className="print-text flex gap-6 text-sm font-bold print:font-bold">
+                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>作答：[{item.studentAnswer}]</span>
+                                            <span className="text-green-400">正確：[{item.answer}]</span>
                                         </div>
                                         {!item.isCorrect && (
-                                            <div className="print-explanation text-xl md:text-2xl text-slate-200 leading-relaxed italic border-t border-slate-800 pt-6 mt-6 bg-slate-950/60 p-6 rounded-2xl border-l-8 border-amber-600">
-                                                <span className="text-amber-500 not-italic font-black block mb-4 uppercase tracking-[0.3em] text-[10px]">詳解解析 / Review</span>
-                                                「{item.explanation}」
+                                            <div className="print-explanation text-xl md:text-2xl text-slate-300 italic mt-4 bg-slate-950/40 p-4 rounded-xl print:text-black">
+                                                <span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black">解析說明：</span>
+                                                {item.explanation}
                                             </div>
                                         )}
                                     </div>
                                 ))}
                             </div>
-                            <button onClick={() => window.location.reload()} className="w-full mt-20 py-10 text-slate-700 hover:text-amber-500 border-t border-slate-900 no-print text-xs uppercase flex items-center justify-center gap-2 font-black tracking-widest">End Session</button>
+                            <button onClick={() => window.location.reload()} className="w-full mt-10 py-6 text-slate-700 border-t border-slate-900 no-print uppercase font-black text-xs">End Session</button>
                         </div>
                     </div>
                 </div>
