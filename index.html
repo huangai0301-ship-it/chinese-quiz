@@ -24,7 +24,7 @@
         
         /* 極簡文字檔 PDF / 列印樣式 */
         @media print {
-            @page { size: A4; margin: 2cm; }
+            @page { size: A4; margin: 1.5cm; }
             .no-print { display: none !important; }
             body { background-color: white !important; color: black !important; }
             .print-container { 
@@ -45,23 +45,24 @@
                 margin-bottom: 15pt !important; 
                 padding-bottom: 10pt !important; 
             }
-            .print-title { font-size: 18pt !important; font-weight: bold !important; margin-bottom: 8pt !important; color: black !important; }
+            .print-title { font-size: 16pt !important; font-weight: bold !important; margin-bottom: 5pt !important; color: black !important; }
             .print-text { font-size: 11pt !important; line-height: 1.5 !important; color: black !important; }
-            .print-meta { font-size: 11pt !important; margin-bottom: 5pt !important; color: black !important; }
+            .print-meta { font-size: 10pt !important; margin-bottom: 3pt !important; color: black !important; }
+            .print-option { font-size: 10pt !important; margin-left: 15pt !important; line-height: 1.3 !important; color: #333 !important; }
             .print-explanation { 
                 font-size: 10pt !important; 
-                margin-top: 5pt !important;
-                border-left: 2pt solid #333 !important;
+                margin-top: 6pt !important;
+                border-left: 2pt solid #666 !important;
                 padding-left: 10pt !important;
-                color: #333 !important;
+                color: #444 !important;
                 font-style: italic !important;
             }
+            .print-selection-marker { font-weight: bold !important; text-decoration: underline !important; color: black !important; }
         }
         
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* 自定義捲軸 */
         .custom-scroll::-webkit-scrollbar { width: 5px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     </style>
@@ -71,12 +72,8 @@
 
     <script type="text/babel">
         // --- 教師核心設定區 ---
-        // 1. 您的最新 GAS 網址
         const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwUXMGkwZlARC1awxbvm2fHi6WxZ-fEsXGcYCzuMLvmeeBy9mjc7Z29VhrPhajfyFJzcw/exec"; 
-        
-        // 2. 您的 Google 試算表發佈網址
         const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
-        
         const ADMIN_PASS = "153154";
         const LOCAL_CSV_FALLBACK = "./test.csv"; 
         // --------------------
@@ -94,24 +91,13 @@
             return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
         };
 
-        /**
-         * 終極防跳動 Input：完全獨立本地狀態，僅在失去焦點或按 Enter 時同步回 App 狀態
-         */
         const FinalSafeInput = ({ value, onFinalChange, placeholder, className, type = "text" }) => {
             const [temp, setTemp] = useState(value || '');
-            
-            useEffect(() => { 
-                if (value !== temp) setTemp(value || ''); 
-            }, [value]);
-
+            useEffect(() => { if (value !== temp) setTemp(value || ''); }, [value]);
             const commit = () => { onFinalChange(temp); };
-
             return (
                 <input 
-                    type={type} 
-                    value={temp} 
-                    placeholder={placeholder} 
-                    className={className}
+                    type={type} value={temp} placeholder={placeholder} className={className}
                     onChange={(e) => setTemp(e.target.value)}
                     onBlur={commit}
                     onKeyDown={(e) => e.key === 'Enter' && commit()}
@@ -131,13 +117,11 @@
             const [emailStatus, setEmailStatus] = useState('');
             const [msg, setMsg] = useState(null);
 
-            // 顯示自定義訊息替代 alert
             const showMsg = (text) => {
                 setMsg(text);
                 setTimeout(() => setMsg(null), 3000);
             };
 
-            // 精準抓取並拆解選項，移除餘贅括號
             const processQuestionText = useCallback((rawText) => {
                 const optRegex = /\s*[\(\（][A-DＡ-Ｄ][\)\）]\s*/g;
                 const parts = rawText.split(optRegex);
@@ -158,7 +142,8 @@
                 const delimiter = text.includes('\t') ? '\t' : ',';
                 const data = rows.slice(1).map(row => {
                     const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
-                    const parsed = processQuestionText(columns[0] || "");
+                    const rawQuestion = columns[0] || "";
+                    const parsed = processQuestionText(rawQuestion);
                     return {
                         ...parsed,
                         answer: (columns[1] || "").toUpperCase().replace(/[ＡＢＣＤ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248)),
@@ -189,18 +174,13 @@
                     return { ...q, studentAnswer, isCorrect };
                 });
 
-                const wrongIndices = detailResults
-                    .map((d, i) => d.isCorrect ? null : i + 1)
-                    .filter(n => n !== null)
-                    .join(', ');
-
+                const wrongIndices = detailResults.map((d, i) => d.isCorrect ? null : i + 1).filter(n => n !== null).join(', ');
                 const report = {
                     score: Math.round(correctCount * scorePerQuestion),
                     date: new Date().toLocaleString('zh-TW'),
                     details: detailResults,
                     wrongQuestions: wrongIndices || "全對"
                 };
-                
                 setResults(report);
                 setView('results');
 
@@ -232,17 +212,14 @@
                             date: results.date,
                             details: results.details.filter(d => !d.isCorrect).map((d) => {
                                 const idx = results.details.indexOf(d) + 1;
-                                return `【第${idx}題】\n題目：${d.stem}\n正確答案：${d.answer}\n解析：${d.explanation}`;
+                                let optText = d.options ? `\n(A)${d.options.A}\n(B)${d.options.B}\n(C)${d.options.C}\n(D)${d.options.D}` : "";
+                                return `【第${idx}題】\n題目：${d.stem}${optText}\n您的作答：${d.studentAnswer}\n正確答案：${d.answer}\n解析：${d.explanation}`;
                             }).join('\n\n')
                         })
                     });
-                    setEmailStatus('發信指令已送出！請稍候檢查您的 Gmail。');
-                } catch (e) {
-                    setEmailStatus('連線伺服器失敗，請確認 GAS 部署連結。');
-                }
+                    setEmailStatus('指令已送出！請檢查 Gmail。');
+                } catch (e) { setEmailStatus('發送失敗，請確認 GAS 設定。'); }
             };
-
-            // --- 視圖 ---
 
             const LoginView = () => (
                 <div className="flex flex-col items-center justify-center min-h-[85vh] px-4 animate-fade-in">
@@ -258,7 +235,7 @@
                                 <FinalSafeInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onFinalChange={v => setStudentInfo(p => ({...p, seat: v}))} />
                                 <FinalSafeInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onFinalChange={v => setStudentInfo(p => ({...p, name: v}))} />
                             </div>
-                            <button onClick={() => quizData.length > 0 ? setView('quiz') : showMsg('題庫載入中，請稍候')} className="w-full bg-amber-600 text-slate-950 font-black py-4.5 rounded-2xl mt-4 active:scale-95 transition-all text-lg shadow-xl shadow-amber-900/20">進入測驗</button>
+                            <button onClick={() => quizData.length > 0 ? setView('quiz') : showMsg('載入中...')} className="w-full bg-amber-600 text-slate-950 font-black py-4.5 rounded-2xl mt-4 shadow-xl active:scale-95 transition-all text-lg">開始測驗</button>
                         </div>
                     </div>
                 </div>
@@ -284,7 +261,7 @@
                                     {['A', 'B', 'C', 'D'].map(opt => (
                                         <button key={opt} onClick={() => setAnswers({...answers, [currentQuestionIndex]: opt})}
                                             className={`group p-6 rounded-2xl border text-left flex items-start gap-5 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-black scale-[1.01]' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
-                                            <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900'}`}>{opt}</span>
+                                            <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900 text-slate-600'}`}>{opt}</span>
                                             <span className="text-xl leading-snug">{q.options ? q.options[opt] : `選項內容 ${opt}`}</span>
                                         </button>
                                     ))}
@@ -293,7 +270,7 @@
                             <div className="flex justify-between mt-16 pt-8 border-t border-slate-800/50">
                                 <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0 transition-all font-bold"><Icon name="chevron-left" size={18}/> 上一題</button>
                                 {currentQuestionIndex === quizData.length - 1 
-                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">交卷結算</button>
+                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg tracking-widest">交卷</button>
                                     : <button onClick={() => setCurrentQuestionIndex(p => p+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">下一題 <Icon name="chevron-right" size={18}/></button>}
                             </div>
                         </div>
@@ -306,53 +283,71 @@
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl print:shadow-none print:border-none">
                         <div className="bg-amber-600 p-10 text-center no-print">
                             <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
-                            <p className="text-slate-900 font-black tracking-widest uppercase text-xs">Total Score</p>
+                            <p className="text-slate-900 font-black uppercase text-xs tracking-[0.2em]">Score Report</p>
                         </div>
                         <div className="p-8 md:p-14 print:p-0">
                             <div className="bg-slate-950/50 p-8 rounded-[2rem] border border-slate-800 mb-10 no-print">
-                                <h4 className="text-amber-500 font-black mb-5 flex items-center gap-2"><Icon name="mail" size={20}/> 寄送正式分析報告至 Gmail</h4>
+                                <h4 className="text-amber-500 font-black mb-5 flex items-center gap-2"><Icon name="mail" size={20}/> 寄送正式報告至 Gmail</h4>
                                 <div className="flex gap-3">
-                                    <FinalSafeInput placeholder="請輸入您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-4 text-slate-100 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo(p => ({...p, email: v}))} />
-                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-10 py-4 rounded-xl active:scale-95 shadow-xl">發送</button>
+                                    <FinalSafeInput placeholder="您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-4 text-slate-100 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo(p => ({...p, email: v}))} />
+                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-10 py-4 rounded-xl active:scale-95 shadow-xl transition-all">發送</button>
                                 </div>
-                                {emailStatus && <p className="text-xs mt-4 text-slate-500 italic flex items-center gap-1"><Icon name="alert-circle" size={14}/> {emailStatus}</p>}
+                                {emailStatus && <p className="text-xs mt-4 text-slate-500 italic flex items-center gap-1 animate-pulse"><Icon name="alert-circle" size={14}/> {emailStatus}</p>}
                             </div>
 
-                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 transition-all flex items-center justify-center gap-2">
-                                <Icon name="download" size={20}/> 下載或列印精簡成果單 (PDF)
+                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 flex items-center justify-center gap-2">
+                                <Icon name="download" size={20}/> 列印或下載精簡成果單 (PDF)
                             </button>
 
-                            {/* 列印內容：極簡文字檔模式 */}
                             <div className="hidden print:block print-header">
                                 <div className="print-title">國文科測驗成果分析報告</div>
                                 <div className="print-meta">
                                     姓名：{studentInfo.name} ({studentInfo.class} 班 {studentInfo.seat} 號) | 
-                                    總分：{results.score} 分<br />
+                                    得分：{results.score} 分<br />
                                     單元：{quizName} | 日期：{results.date}
                                 </div>
                             </div>
 
-                            <div className="space-y-6">
+                            <div className="space-y-10 print:space-y-8">
                                 {results.details.map((item, idx) => (
                                     <div key={idx} className="print-card p-6 border border-slate-800 print:border-none print:p-0">
                                         <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4">
-                                            Q{idx+1}. {item.stem}
+                                            <span className="text-slate-600 font-mono mr-3 text-sm print:text-black">Q{idx+1}.</span>{item.stem}
                                         </p>
-                                        <div className="print-text flex gap-8 text-sm font-bold">
-                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>作答：[{item.studentAnswer}]</span>
-                                            <span className="text-green-400">正確答案：[{item.answer}]</span>
-                                            <span className="no-print">{item.isCorrect ? ' (V)' : ' (X)'}</span>
+                                        
+                                        {/* 呈現完整選項內容 */}
+                                        <div className="mb-6 space-y-2">
+                                            {item.options && ['A','B','C','D'].map(o => (
+                                                <div key={o} className={`text-sm md:text-base print-option ${
+                                                    (item.studentAnswer === o) ? 'text-amber-400 font-bold print-selection-marker' : 'text-slate-400'
+                                                }`}>
+                                                    ({o}) {item.options[o]}
+                                                    {(item.studentAnswer === o) && <span className="ml-2 no-print">[您的選擇]</span>}
+                                                    {(item.answer === o) && <span className="ml-2 no-print text-green-500 font-black">[正確答案]</span>}
+                                                </div>
+                                            ))}
                                         </div>
+
+                                        <div className="print-text flex gap-8 text-sm font-bold border-t border-slate-800/50 pt-4 print:border-none print:pt-0">
+                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>
+                                                您的作答：[{item.studentAnswer}]
+                                            </span>
+                                            <span className="text-green-400">
+                                                正確答案：[{item.answer}]
+                                            </span>
+                                            <span className="no-print opacity-50">{item.isCorrect ? ' (V)' : ' (X)'}</span>
+                                        </div>
+
                                         {!item.isCorrect && (
                                             <div className="print-explanation text-lg md:text-xl text-slate-300 italic mt-5 bg-slate-950/40 p-5 rounded-2xl print:text-black print:bg-none print:p-2 border-l-4 border-amber-600">
-                                                <span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black">解析說明：</span>
+                                                <span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black tracking-widest">解析說明：</span>
                                                 {item.explanation}
                                             </div>
                                         )}
                                     </div>
                                 ))}
                             </div>
-                            <button onClick={() => window.location.reload()} className="w-full mt-20 py-10 text-slate-700 hover:text-amber-500 border-t border-slate-900 no-print uppercase font-black text-xs tracking-widest">End Session & Return Home</button>
+                            <button onClick={() => window.location.reload()} className="w-full mt-20 py-10 text-slate-700 hover:text-amber-500 border-t border-slate-900 no-print uppercase font-black text-xs tracking-widest">End Session</button>
                         </div>
                     </div>
                 </div>
