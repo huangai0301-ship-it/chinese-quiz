@@ -19,14 +19,20 @@
             background-color: #020617; 
             color: #f8fafc; 
             margin: 0; 
+            overflow-x: hidden;
         }
         
-        /* 極簡文字檔 PDF 列印樣式 */
+        /* 極簡文字檔 PDF / 列印樣式 */
         @media print {
             @page { size: A4; margin: 2cm; }
             .no-print { display: none !important; }
             body { background-color: white !important; color: black !important; }
-            .print-container { background-color: white !important; padding: 0 !important; margin: 0 !important; width: 100% !important; }
+            .print-container { 
+                background-color: white !important; 
+                padding: 0 !important; 
+                margin: 0 !important; 
+                width: 100% !important; 
+            }
             .print-card {
                 border: none !important;
                 border-bottom: 0.5pt solid #000 !important;
@@ -34,21 +40,30 @@
                 padding: 0 0 10pt 0 !important;
                 page-break-inside: avoid;
             }
-            .print-header { border-bottom: 1.5pt solid black !important; margin-bottom: 20pt !important; padding-bottom: 10pt !important; }
-            .print-title { font-size: 18pt !important; font-weight: bold !important; margin-bottom: 8pt !important; }
+            .print-header { 
+                border-bottom: 1.5pt solid black !important; 
+                margin-bottom: 15pt !important; 
+                padding-bottom: 10pt !important; 
+            }
+            .print-title { font-size: 18pt !important; font-weight: bold !important; margin-bottom: 8pt !important; color: black !important; }
             .print-text { font-size: 11pt !important; line-height: 1.5 !important; color: black !important; }
-            .print-meta { font-size: 11pt !important; margin-bottom: 5pt !important; }
+            .print-meta { font-size: 11pt !important; margin-bottom: 5pt !important; color: black !important; }
             .print-explanation { 
                 font-size: 10pt !important; 
                 margin-top: 5pt !important;
                 border-left: 2pt solid #333 !important;
                 padding-left: 10pt !important;
                 color: #333 !important;
+                font-style: italic !important;
             }
         }
         
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* 自定義捲軸 */
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -56,8 +71,12 @@
 
     <script type="text/babel">
         // --- 教師核心設定區 ---
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybMG3mL2OgqX_i0ZeRexPy619ErLP_S9EjdLJbUw2-FjCFuJy2xqxzhPVlzuZ9wWUQdg/exec"; 
+        // 1. 您的最新 GAS 網址
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwUXMGkwZlARC1awxbvm2fHi6WxZ-fEsXGcYCzuMLvmeeBy9mjc7Z29VhrPhajfyFJzcw/exec"; 
+        
+        // 2. 您的 Google 試算表發佈網址
         const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
+        
         const ADMIN_PASS = "153154";
         const LOCAL_CSV_FALLBACK = "./test.csv"; 
         // --------------------
@@ -76,19 +95,16 @@
         };
 
         /**
-         * 終極解決跳動方案：完全獨立的本地狀態輸入框
+         * 終極防跳動 Input：完全獨立本地狀態，僅在失去焦點或按 Enter 時同步回 App 狀態
          */
         const FinalSafeInput = ({ value, onFinalChange, placeholder, className, type = "text" }) => {
             const [temp, setTemp] = useState(value || '');
             
-            // 只有在外部初始載入時同步一次
-            useEffect(() => {
-                if (value !== temp) setTemp(value || '');
+            useEffect(() => { 
+                if (value !== temp) setTemp(value || ''); 
             }, [value]);
 
-            const commit = () => {
-                onFinalChange(temp);
-            };
+            const commit = () => { onFinalChange(temp); };
 
             return (
                 <input 
@@ -108,14 +124,21 @@
             const [view, setView] = useState('login');
             const [studentInfo, setStudentInfo] = useState({ class: '', seat: '', name: '', email: '' });
             const [quizData, setQuizData] = useState([]);
-            const [quizName, setQuizName] = useState('載入中...');
+            const [quizName, setQuizName] = useState('資料載入中...');
             const [answers, setAnswers] = useState({});
             const [results, setResults] = useState(null);
             const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
             const [emailStatus, setEmailStatus] = useState('');
+            const [msg, setMsg] = useState(null);
 
+            // 顯示自定義訊息替代 alert
+            const showMsg = (text) => {
+                setMsg(text);
+                setTimeout(() => setMsg(null), 3000);
+            };
+
+            // 精準抓取並拆解選項，移除餘贅括號
             const processQuestionText = useCallback((rawText) => {
-                // 優化正則：精準抓取並移除 (A) (B) (C) (D) 或全形版本
                 const optRegex = /\s*[\(\（][A-DＡ-Ｄ][\)\）]\s*/g;
                 const parts = rawText.split(optRegex);
                 if (parts && parts.length >= 5) {
@@ -135,8 +158,7 @@
                 const delimiter = text.includes('\t') ? '\t' : ',';
                 const data = rows.slice(1).map(row => {
                     const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
-                    const rawQuestion = columns[0] || "";
-                    const parsed = processQuestionText(rawQuestion);
+                    const parsed = processQuestionText(columns[0] || "");
                     return {
                         ...parsed,
                         answer: (columns[1] || "").toUpperCase().replace(/[ＡＢＣＤ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248)),
@@ -147,13 +169,14 @@
             }, [processQuestionText]);
 
             useEffect(() => {
-                fetch(CLOUD_CSV_URL || LOCAL_CSV_FALLBACK)
+                const targetUrl = CLOUD_CSV_URL || LOCAL_CSV_FALLBACK;
+                fetch(targetUrl)
                     .then(res => res.text())
                     .then(text => {
                         parseCSV(text);
-                        setQuizName("國文科專測單元");
+                        setQuizName("國文科專題測驗單元");
                     })
-                    .catch(() => setQuizName("連線失敗"));
+                    .catch(() => setQuizName("資料庫連結失敗"));
             }, [parseCSV]);
 
             const handleSubmitQuiz = async () => {
@@ -166,17 +189,21 @@
                     return { ...q, studentAnswer, isCorrect };
                 });
 
-                const wrongIndices = detailResults.map((d, i) => d.isCorrect ? null : i + 1).filter(n => n !== null).join(', ');
+                const wrongIndices = detailResults
+                    .map((d, i) => d.isCorrect ? null : i + 1)
+                    .filter(n => n !== null)
+                    .join(', ');
+
                 const report = {
                     score: Math.round(correctCount * scorePerQuestion),
                     date: new Date().toLocaleString('zh-TW'),
                     details: detailResults,
                     wrongQuestions: wrongIndices || "全對"
                 };
+                
                 setResults(report);
                 setView('results');
 
-                // 自動傳送 GAS 記錄成績
                 if (GAS_WEB_APP_URL) {
                     fetch(GAS_WEB_APP_URL, {
                         method: 'POST',
@@ -187,7 +214,10 @@
             };
 
             const sendRealEmail = async () => {
-                if (!studentInfo.email.includes('@')) return alert('Email 格式有誤');
+                if (!studentInfo.email || !studentInfo.email.includes('@')) {
+                    showMsg('請輸入完整的電子郵件位址');
+                    return;
+                }
                 setEmailStatus('正在發送...');
                 try {
                     await fetch(GAS_WEB_APP_URL, {
@@ -200,32 +230,35 @@
                             score: results.score,
                             quizName,
                             date: results.date,
-                            details: results.details.filter(d => !d.isCorrect).map((d, idx) => `題號：${results.details.indexOf(d)+1}\n題目：${d.stem}\n正確答案：${d.answer}`).join('\n\n')
+                            details: results.details.filter(d => !d.isCorrect).map((d) => {
+                                const idx = results.details.indexOf(d) + 1;
+                                return `【第${idx}題】\n題目：${d.stem}\n正確答案：${d.answer}\n解析：${d.explanation}`;
+                            }).join('\n\n')
                         })
                     });
-                    setEmailStatus('信件已進入寄送流程，請檢查 Gmail 收件匣。');
+                    setEmailStatus('發信指令已送出！請稍候檢查您的 Gmail。');
                 } catch (e) {
-                    setEmailStatus('連線 GAS 伺服器失敗。');
+                    setEmailStatus('連線伺服器失敗，請確認 GAS 部署連結。');
                 }
             };
 
-            // --- Views ---
+            // --- 視圖 ---
 
             const LoginView = () => (
                 <div className="flex flex-col items-center justify-center min-h-[85vh] px-4 animate-fade-in">
                     <div className="text-center mb-10">
-                        <Icon name="book" size={56} className="text-amber-500 mb-4" />
-                        <h1 className="text-3xl font-black text-slate-100 mb-2">國文科雲端即時測驗</h1>
+                        <Icon name="book-open" size={56} className="text-amber-500 mb-4" />
+                        <h1 className="text-3xl font-black text-slate-100 mb-2">國文科雲端即時測驗系統</h1>
                         <p className="text-slate-500 italic text-sm">{quizName}</p>
                     </div>
-                    <div className="w-full max-w-md bg-slate-900/60 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl">
+                    <div className="w-full max-w-md bg-slate-900/60 p-8 rounded-[2rem] border border-slate-800 shadow-2xl">
                         <div className="space-y-6">
-                            <FinalSafeInput placeholder="班級" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.class} onFinalChange={v => setStudentInfo({...studentInfo, class: v})} />
+                            <FinalSafeInput placeholder="班級 (例如 101)" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.class} onFinalChange={v => setStudentInfo(p => ({...p, class: v}))} />
                             <div className="grid grid-cols-2 gap-4">
-                                <FinalSafeInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onFinalChange={v => setStudentInfo({...studentInfo, seat: v})} />
-                                <FinalSafeInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onFinalChange={v => setStudentInfo({...studentInfo, name: v})} />
+                                <FinalSafeInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onFinalChange={v => setStudentInfo(p => ({...p, seat: v}))} />
+                                <FinalSafeInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onFinalChange={v => setStudentInfo(p => ({...p, name: v}))} />
                             </div>
-                            <button onClick={() => quizData.length > 0 ? setView('quiz') : alert('載入中...')} className="w-full bg-amber-600 text-slate-950 font-black py-4 rounded-xl mt-4 active:scale-95 transition-all text-lg">進入測驗</button>
+                            <button onClick={() => quizData.length > 0 ? setView('quiz') : showMsg('題庫載入中，請稍候')} className="w-full bg-amber-600 text-slate-950 font-black py-4.5 rounded-2xl mt-4 active:scale-95 transition-all text-lg shadow-xl shadow-amber-900/20">進入測驗</button>
                         </div>
                     </div>
                 </div>
@@ -235,30 +268,33 @@
                 const q = quizData[currentQuestionIndex];
                 return (
                     <div className="max-w-3xl mx-auto py-10 px-4 animate-fade-in">
-                        <div className="flex justify-between items-end mb-6">
+                        <div className="flex justify-between items-end mb-8 px-2">
                             <h2 className="text-xl font-bold text-amber-500">{quizName}</h2>
-                            <p className="text-slate-500 font-mono text-xs uppercase">{currentQuestionIndex + 1} / {quizData.length}</p>
+                            <p className="text-slate-500 font-mono text-sm uppercase">{currentQuestionIndex + 1} / {quizData.length}</p>
                         </div>
-                        <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] shadow-2xl min-h-[500px] flex flex-col justify-between">
+                        <div className="bg-slate-900 border border-slate-800 p-8 md:p-14 rounded-[3rem] shadow-2xl min-h-[550px] flex flex-col justify-between relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
+                                <div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div>
+                            </div>
                             <div>
-                                <h3 className="text-2xl md:text-3xl font-bold mb-10 leading-relaxed text-slate-100 italic">
+                                <h3 className="text-2xl md:text-3xl font-bold mb-12 leading-relaxed text-slate-100 italic">
                                     {currentQuestionIndex + 1}. 「{q.stem}」
                                 </h3>
-                                <div className="grid grid-cols-1 gap-4">
+                                <div className="grid grid-cols-1 gap-5">
                                     {['A', 'B', 'C', 'D'].map(opt => (
                                         <button key={opt} onClick={() => setAnswers({...answers, [currentQuestionIndex]: opt})}
-                                            className={`p-5 rounded-2xl border text-left flex items-start gap-4 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
-                                            <span className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900'}`}>{opt}</span>
-                                            <span className="text-lg leading-snug">{q.options ? q.options[opt] : `選項 ${opt}`}</span>
+                                            className={`group p-6 rounded-2xl border text-left flex items-start gap-5 transition-all ${answers[currentQuestionIndex] === opt ? 'bg-amber-500 border-amber-500 text-slate-950 font-black scale-[1.01]' : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'}`}>
+                                            <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center font-black ${answers[currentQuestionIndex] === opt ? 'bg-slate-950 text-amber-500' : 'bg-slate-900'}`}>{opt}</span>
+                                            <span className="text-xl leading-snug">{q.options ? q.options[opt] : `選項內容 ${opt}`}</span>
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                            <div className="flex justify-between mt-12 pt-6 border-t border-slate-800/50">
-                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0"><Icon name="chevron-left" size={16}/> 上一題</button>
+                            <div className="flex justify-between mt-16 pt-8 border-t border-slate-800/50">
+                                <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0 transition-all font-bold"><Icon name="chevron-left" size={18}/> 上一題</button>
                                 {currentQuestionIndex === quizData.length - 1 
-                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-10 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">交卷</button>
-                                    : <button onClick={() => setCurrentQuestionIndex(p => p+1)} className="text-amber-500 font-bold flex items-center gap-1">下一題 <Icon name="chevron-right" size={16}/></button>}
+                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">交卷結算</button>
+                                    : <button onClick={() => setCurrentQuestionIndex(p => p+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">下一題 <Icon name="chevron-right" size={18}/></button>}
                             </div>
                         </div>
                     </div>
@@ -270,29 +306,29 @@
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl print:shadow-none print:border-none">
                         <div className="bg-amber-600 p-10 text-center no-print">
                             <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
-                            <p className="text-slate-950 font-bold uppercase text-xs">Final Score</p>
+                            <p className="text-slate-900 font-black tracking-widest uppercase text-xs">Total Score</p>
                         </div>
-                        <div className="p-10 md:p-16 print:p-0">
-                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800 mb-10 no-print">
-                                <h4 className="text-amber-500 font-bold mb-4 flex items-center gap-2"><Icon name="mail" size={18}/> 寄送測驗分析至 Gmail</h4>
+                        <div className="p-8 md:p-14 print:p-0">
+                            <div className="bg-slate-950/50 p-8 rounded-[2rem] border border-slate-800 mb-10 no-print">
+                                <h4 className="text-amber-500 font-black mb-5 flex items-center gap-2"><Icon name="mail" size={20}/> 寄送正式分析報告至 Gmail</h4>
                                 <div className="flex gap-3">
-                                    <FinalSafeInput placeholder="您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 outline-none" value={studentInfo.email} onFinalChange={v => setStudentInfo({...studentInfo, email: v})} />
-                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-8 py-3 rounded-xl active:scale-95">發送</button>
+                                    <FinalSafeInput placeholder="請輸入您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-4 text-slate-100 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo(p => ({...p, email: v}))} />
+                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-10 py-4 rounded-xl active:scale-95 shadow-xl">發送</button>
                                 </div>
-                                {emailStatus && <p className="text-xs mt-3 text-slate-500 italic">{emailStatus}</p>}
+                                {emailStatus && <p className="text-xs mt-4 text-slate-500 italic flex items-center gap-1"><Icon name="alert-circle" size={14}/> {emailStatus}</p>}
                             </div>
 
-                            <button onClick={() => window.print()} className="w-full bg-slate-800 py-3 rounded-xl mb-12 font-bold no-print border border-slate-700">
-                                <Icon name="download" size={18}/> 列印或下載成果報告單 (PDF)
+                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 transition-all flex items-center justify-center gap-2">
+                                <Icon name="download" size={20}/> 下載或列印精簡成果單 (PDF)
                             </button>
 
-                            {/* 列印專用內容 */}
+                            {/* 列印內容：極簡文字檔模式 */}
                             <div className="hidden print:block print-header">
-                                <div className="print-title">國文測驗成果分析報告</div>
+                                <div className="print-title">國文科測驗成果分析報告</div>
                                 <div className="print-meta">
-                                    姓名：{studentInfo.name} ({studentInfo.class}班 {studentInfo.seat}號)<br />
-                                    測驗：{quizName} | 日期：{results.date}<br />
-                                    總分：{results.score} 分
+                                    姓名：{studentInfo.name} ({studentInfo.class} 班 {studentInfo.seat} 號) | 
+                                    總分：{results.score} 分<br />
+                                    單元：{quizName} | 日期：{results.date}
                                 </div>
                             </div>
 
@@ -302,12 +338,13 @@
                                         <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4">
                                             Q{idx+1}. {item.stem}
                                         </p>
-                                        <div className="print-text flex gap-6 text-sm font-bold print:font-bold">
+                                        <div className="print-text flex gap-8 text-sm font-bold">
                                             <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>作答：[{item.studentAnswer}]</span>
-                                            <span className="text-green-400">正確：[{item.answer}]</span>
+                                            <span className="text-green-400">正確答案：[{item.answer}]</span>
+                                            <span className="no-print">{item.isCorrect ? ' (V)' : ' (X)'}</span>
                                         </div>
                                         {!item.isCorrect && (
-                                            <div className="print-explanation text-xl md:text-2xl text-slate-300 italic mt-4 bg-slate-950/40 p-4 rounded-xl print:text-black">
+                                            <div className="print-explanation text-lg md:text-xl text-slate-300 italic mt-5 bg-slate-950/40 p-5 rounded-2xl print:text-black print:bg-none print:p-2 border-l-4 border-amber-600">
                                                 <span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black">解析說明：</span>
                                                 {item.explanation}
                                             </div>
@@ -315,7 +352,7 @@
                                     </div>
                                 ))}
                             </div>
-                            <button onClick={() => window.location.reload()} className="w-full mt-10 py-6 text-slate-700 border-t border-slate-900 no-print uppercase font-black text-xs">End Session</button>
+                            <button onClick={() => window.location.reload()} className="w-full mt-20 py-10 text-slate-700 hover:text-amber-500 border-t border-slate-900 no-print uppercase font-black text-xs tracking-widest">End Session & Return Home</button>
                         </div>
                     </div>
                 </div>
@@ -323,6 +360,11 @@
 
             return (
                 <div className="min-h-screen">
+                    {msg && (
+                        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] bg-amber-500 text-slate-950 px-6 py-3 rounded-full font-bold shadow-2xl animate-fade-in">
+                            {msg}
+                        </div>
+                    )}
                     {view === 'login' && <LoginView />}
                     {view === 'quiz' && <QuizView />}
                     {view === 'results' && <ResultsView />}
