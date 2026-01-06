@@ -72,14 +72,13 @@
 
     <script type="text/babel">
         // --- 教師核心設定區 ---
-        // 1. 已更新為您最新的 GAS 部署網址
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyTZTovnBfUoV7d1MJb_mFcZH7y_g3Pp5zUpePTer4p1o03wO3mWoHvBf15Jo1Nw-hzVg/exec"; 
+        // 1. 已更新為您最新提供的 GAS 部署網址
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwk9oZiPU_4y7Gky7gTfs2jiIAtu-pnw43AaLWxTSvAnE2-zZ9InhrixyN2fQY6VNHFcg/exec"; 
         
         // 2. 雲端題庫連結
         const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
         
         const ADMIN_PASS = "153154";
-        const LOCAL_CSV_FALLBACK = "./test.csv"; 
         // --------------------
 
         const { useState, useEffect, useCallback, useRef } = React;
@@ -95,19 +94,34 @@
             return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
         };
 
+        /**
+         * 終極解決輸入問題：支援中文 IME 與數字輸入，完全不跳動
+         */
         const FinalSafeInput = ({ value, onFinalChange, placeholder, className, type = "text" }) => {
-            const [temp, setTemp] = useState(value || '');
-            useEffect(() => { if (value !== temp) setTemp(value || ''); }, [value]);
-            const commit = () => { onFinalChange(temp); };
+            const [local, setLocal] = useState(value || '');
+            const isComposing = useRef(false);
+
+            useEffect(() => { 
+                if (!isComposing.current && value !== local) setLocal(value || ''); 
+            }, [value]);
+
+            const update = (val) => {
+                setLocal(val);
+                // 只有在非組字期間（非中文輸入過程），才同步回全局狀態
+                if (!isComposing.current) onFinalChange(val);
+            };
+
             return (
                 <input 
-                    type={type} value={temp} placeholder={placeholder} className={className}
-                    onChange={(e) => {
-                        setTemp(e.target.value);
+                    type={type} value={local} placeholder={placeholder} className={className}
+                    onChange={(e) => update(e.target.value)}
+                    onCompositionStart={() => { isComposing.current = true; }}
+                    onCompositionEnd={(e) => {
+                        isComposing.current = false;
                         onFinalChange(e.target.value);
                     }}
-                    onBlur={commit}
-                    onKeyDown={(e) => e.key === 'Enter' && commit()}
+                    onBlur={() => onFinalChange(local)}
+                    onKeyDown={(e) => e.key === 'Enter' && onFinalChange(local)}
                     autoComplete="off"
                 />
             );
@@ -142,34 +156,29 @@
                 return { stem: rawText, options: null, isParsed: false };
             }, []);
 
-            const parseCSV = useCallback((text) => {
-                const rows = text.split(/\r?\n/).filter(line => line.trim() !== "");
-                const delimiter = text.includes('\t') ? '\t' : ',';
-                const data = rows.slice(1).map(row => {
-                    const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
-                    const rawQuestion = columns[0] || "";
-                    const parsed = processQuestionText(rawQuestion);
-                    return {
-                        ...parsed,
-                        answer: (columns[1] || "").toUpperCase().replace(/[ＡＢＣＤ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248)),
-                        explanation: columns[2] || ""
-                    };
-                }).filter(item => item.stem && item.answer);
-                setQuizData(data);
-            }, [processQuestionText]);
-
             useEffect(() => {
-                fetch(CLOUD_CSV_URL || LOCAL_CSV_FALLBACK)
+                fetch(CLOUD_CSV_URL)
                     .then(res => res.text())
                     .then(text => {
-                        parseCSV(text);
+                        const rows = text.split(/\r?\n/).filter(line => line.trim() !== "");
+                        const delimiter = text.includes('\t') ? '\t' : ',';
+                        const data = rows.slice(1).map(row => {
+                            const columns = row.split(delimiter).map(col => col.replace(/^"|"$/g, '').trim());
+                            const parsed = processQuestionText(columns[0] || "");
+                            return { 
+                                ...parsed, 
+                                answer: (columns[1] || "").toUpperCase().replace(/[ＡＢＣＤ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248)), 
+                                explanation: columns[2] || "" 
+                            };
+                        }).filter(item => item.stem && item.answer);
+                        setQuizData(data);
                         setQuizName("國文科專題測驗");
                     })
                     .catch(() => setQuizName("連線失敗"));
-            }, [parseCSV]);
+            }, [processQuestionText]);
 
             const handleFinalAction = async () => {
-                if (!studentInfo.email.includes('@')) {
+                if (!studentInfo.email || !studentInfo.email.includes('@')) {
                     showMsg('請輸入正確的 Gmail 信箱地址');
                     return;
                 }
@@ -213,7 +222,7 @@
                     });
                     setEmailStatus('成績已上傳！請檢查信箱。');
                 } catch (e) {
-                    setEmailStatus('連線失敗，請聯繫教師。');
+                    setEmailStatus('連線失敗，請檢查網路。');
                 }
             };
 
@@ -268,7 +277,7 @@
                                 {currentQuestionIndex === quizData.length - 1 
                                     ? <div className="flex flex-col items-end gap-3">
                                         <FinalSafeInput placeholder="輸入 Gmail 以存檔寄信" className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 text-sm w-64 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo({...studentInfo, email: v})} />
-                                        <button onClick={handleFinalAction} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">確認提交並寄送</button>
+                                        <button onClick={handleFinalAction} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg tracking-widest">確認提交並寄送</button>
                                       </div>
                                     : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">下一題 <Icon name="chevron-right" size={18}/></button>}
                             </div>
@@ -282,7 +291,7 @@
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl print:shadow-none print:border-none">
                         <div className="bg-amber-600 p-10 text-center no-print">
                             <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
-                            <p className="text-slate-950 font-bold tracking-widest uppercase text-xs">{emailStatus || 'Score Report'}</p>
+                            <p className="text-slate-900 font-black tracking-widest uppercase text-xs">{emailStatus || 'Score Report'}</p>
                         </div>
                         <div className="p-8 md:p-14 print:p-0">
                             <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 flex items-center justify-center gap-2">
@@ -311,7 +320,7 @@
                                                     (item.studentAnswer === o) ? 'text-amber-400 font-bold print-selection-marker' : 'text-slate-400'
                                                 }`}>
                                                     ({o}) {item.options[o]}
-                                                    {(item.studentAnswer === o) && <span className="ml-2 no-print text-[10px] bg-slate-800 px-2 py-0.5 rounded">您的選擇</span>}
+                                                    {(item.studentAnswer === o) && <span className="ml-2 no-print text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300">您的選擇</span>}
                                                     {(item.answer === o) && <span className="ml-2 no-print text-[10px] bg-green-900/50 px-2 py-0.5 rounded text-green-400">正確解答</span>}
                                                 </div>
                                             ))}
