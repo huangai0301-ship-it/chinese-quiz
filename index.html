@@ -72,8 +72,12 @@
 
     <script type="text/babel">
         // --- 教師核心設定區 ---
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwUXMGkwZlARC1awxbvm2fHi6WxZ-fEsXGcYCzuMLvmeeBy9mjc7Z29VhrPhajfyFJzcw/exec"; 
+        // 1. 已更新為您最新的 GAS 部署網址
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyTZTovnBfUoV7d1MJb_mFcZH7y_g3Pp5zUpePTer4p1o03wO3mWoHvBf15Jo1Nw-hzVg/exec"; 
+        
+        // 2. 雲端題庫連結
         const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
+        
         const ADMIN_PASS = "153154";
         const LOCAL_CSV_FALLBACK = "./test.csv"; 
         // --------------------
@@ -98,7 +102,10 @@
             return (
                 <input 
                     type={type} value={temp} placeholder={placeholder} className={className}
-                    onChange={(e) => setTemp(e.target.value)}
+                    onChange={(e) => {
+                        setTemp(e.target.value);
+                        onFinalChange(e.target.value);
+                    }}
                     onBlur={commit}
                     onKeyDown={(e) => e.key === 'Enter' && commit()}
                     autoComplete="off"
@@ -156,12 +163,19 @@
                     .then(res => res.text())
                     .then(text => {
                         parseCSV(text);
-                        setQuizName("國文科專題測驗單元");
+                        setQuizName("國文科專題測驗");
                     })
-                    .catch(() => setQuizName("資料庫連結失敗"));
+                    .catch(() => setQuizName("連線失敗"));
             }, [parseCSV]);
 
-            const handleSubmitQuiz = async () => {
+            const handleFinalAction = async () => {
+                if (!studentInfo.email.includes('@')) {
+                    showMsg('請輸入正確的 Gmail 信箱地址');
+                    return;
+                }
+                
+                setEmailStatus('正在同步成績並發送郵件...');
+                
                 const scorePerQuestion = 100 / quizData.length;
                 let correctCount = 0;
                 const detailResults = quizData.map((q, idx) => {
@@ -172,51 +186,34 @@
                 });
 
                 const wrongIndices = detailResults.map((d, i) => d.isCorrect ? null : i + 1).filter(n => n !== null).join(', ');
-                const report = {
+                
+                const emailDetails = detailResults.filter(d => !d.isCorrect).map((d) => {
+                    const idx = detailResults.indexOf(d) + 1;
+                    let optText = d.options ? `\n(A)${d.options.A}\n(B)${d.options.B}\n(C)${d.options.C}\n(D)${d.options.D}` : "";
+                    return `【第${idx}題】\n題目：${d.stem}${optText}\n您的作答：${d.studentAnswer}\n正確答案：${d.answer}\n解析：${d.explanation}`;
+                }).join('\n\n');
+
+                const payload = {
+                    ...studentInfo,
                     score: Math.round(correctCount * scorePerQuestion),
                     date: new Date().toLocaleString('zh-TW'),
-                    details: detailResults,
-                    wrongQuestions: wrongIndices || "全對"
+                    wrongQuestions: wrongIndices || "全對",
+                    details: emailDetails,
+                    quizName: quizName
                 };
-                setResults(report);
+
+                setResults({ ...payload, detailsData: detailResults });
                 setView('results');
 
-                if (GAS_WEB_APP_URL) {
-                    fetch(GAS_WEB_APP_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        body: JSON.stringify({ ...studentInfo, ...report, action: 'logScore' })
-                    });
-                }
-            };
-
-            const sendRealEmail = async () => {
-                if (!studentInfo.email || !studentInfo.email.includes('@')) {
-                    showMsg('請輸入完整的電子郵件位址');
-                    return;
-                }
-                setEmailStatus('正在發送...');
                 try {
                     await fetch(GAS_WEB_APP_URL, {
                         method: 'POST',
                         mode: 'no-cors',
-                        body: JSON.stringify({
-                            action: 'sendEmail',
-                            email: studentInfo.email,
-                            name: studentInfo.name,
-                            score: results.score,
-                            quizName,
-                            date: results.date,
-                            details: results.details.filter(d => !d.isCorrect).map((d) => {
-                                const idx = results.details.indexOf(d) + 1;
-                                let optText = d.options ? `\n(A)${d.options.A}\n(B)${d.options.B}\n(C)${d.options.C}\n(D)${d.options.D}` : "";
-                                return `【第${idx}題】\n題目：「${d.stem}」${optText}\n您的作答：${d.studentAnswer}\n正確答案：${d.answer}\n解析：${d.explanation}`;
-                            }).join('\n\n')
-                        })
+                        body: JSON.stringify(payload)
                     });
-                    setEmailStatus('指令已送出！請稍候檢查您的 Gmail。');
+                    setEmailStatus('成績已上傳！請檢查信箱。');
                 } catch (e) {
-                    setEmailStatus('發送失敗，請確認 GAS 設定。');
+                    setEmailStatus('連線失敗，請聯繫教師。');
                 }
             };
 
@@ -254,7 +251,7 @@
                             </div>
                             <div>
                                 <h3 className="text-2xl md:text-3xl font-bold mb-12 leading-relaxed text-slate-100 italic">
-                                    {currentQuestionIndex + 1}. 「{q.stem}」
+                                    {currentQuestionIndex + 1}. {q.stem}
                                 </h3>
                                 <div className="grid grid-cols-1 gap-5">
                                     {['A', 'B', 'C', 'D'].map(opt => (
@@ -269,7 +266,10 @@
                             <div className="flex justify-between mt-16 pt-8 border-t border-slate-800/50">
                                 <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0 transition-all font-bold"><Icon name="chevron-left" size={18}/> 上一題</button>
                                 {currentQuestionIndex === quizData.length - 1 
-                                    ? <button onClick={handleSubmitQuiz} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg tracking-widest">交卷結算</button>
+                                    ? <div className="flex flex-col items-end gap-3">
+                                        <FinalSafeInput placeholder="輸入 Gmail 以存檔寄信" className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 text-sm w-64 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo({...studentInfo, email: v})} />
+                                        <button onClick={handleFinalAction} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg">確認提交並寄送</button>
+                                      </div>
                                     : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">下一題 <Icon name="chevron-right" size={18}/></button>}
                             </div>
                         </div>
@@ -282,18 +282,9 @@
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl print:shadow-none print:border-none">
                         <div className="bg-amber-600 p-10 text-center no-print">
                             <h2 className="text-7xl font-black text-slate-950">{results.score}</h2>
-                            <p className="text-slate-900 font-black tracking-widest uppercase text-xs">Total Score</p>
+                            <p className="text-slate-950 font-bold tracking-widest uppercase text-xs">{emailStatus || 'Score Report'}</p>
                         </div>
                         <div className="p-8 md:p-14 print:p-0">
-                            <div className="bg-slate-950/50 p-8 rounded-[2rem] border border-slate-800 mb-10 no-print">
-                                <h4 className="text-amber-500 font-black mb-5 flex items-center gap-2"><Icon name="mail" size={20}/> 寄送正式報告至 Gmail</h4>
-                                <div className="flex gap-3">
-                                    <FinalSafeInput placeholder="請輸入您的 Gmail" className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-5 py-4 text-slate-100 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo(p => ({...p, email: v}))} />
-                                    <button onClick={sendRealEmail} className="bg-amber-600 text-slate-950 font-black px-10 py-4 rounded-xl active:scale-95 shadow-xl transition-all">發送</button>
-                                </div>
-                                {emailStatus && <p className="text-xs mt-4 text-slate-500 italic flex items-center gap-1 animate-pulse"><Icon name="alert-circle" size={14}/> {emailStatus}</p>}
-                            </div>
-
                             <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 flex items-center justify-center gap-2">
                                 <Icon name="download" size={20}/> 下載或列印精簡成果單 (PDF)
                             </button>
@@ -301,18 +292,17 @@
                             <div className="hidden print:block print-header">
                                 <div className="print-title">國文科測驗成果分析報告</div>
                                 <div className="print-meta">
-                                    姓名：{studentInfo.name} ({studentInfo.class} 班 {studentInfo.seat} 號) | 
+                                    姓名：{results.name} ({results.class} 班 {results.seat} 號) | 
                                     得分：{results.score} 分<br />
                                     單元：{quizName} | 日期：{results.date}
                                 </div>
                             </div>
 
                             <div className="space-y-10 print:space-y-8">
-                                {results.details.map((item, idx) => (
+                                {results.detailsData.map((item, idx) => (
                                     <div key={idx} className="print-card p-6 border border-slate-800 print:border-none print:p-0">
                                         <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4">
-                                            <span className="text-slate-600 font-mono mr-3 text-sm print:text-black">Q{idx+1}.</span>
-                                            「{item.stem}」
+                                            <span className="text-slate-600 font-mono mr-3 text-sm print:text-black">Q{idx+1}.</span>{item.stem}
                                         </p>
                                         
                                         <div className="mb-6 space-y-2">
