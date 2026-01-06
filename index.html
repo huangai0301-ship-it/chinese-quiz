@@ -72,13 +72,8 @@
 
     <script type="text/babel">
         // --- 教師核心設定區 ---
-        // 1. 已更新為您最新提供的 GAS 部署網址
         const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwk9oZiPU_4y7Gky7gTfs2jiIAtu-pnw43AaLWxTSvAnE2-zZ9InhrixyN2fQY6VNHFcg/exec"; 
-        
-        // 2. 雲端題庫連結
         const CLOUD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeeTPV9EYTlaOLrCNmA6UvRJOtpshFIMHCfp11JwNwvFnAYc5v73_ytLM3MSQUsfNpxOmsfZucPeZZ/pub?output=csv"; 
-        
-        const ADMIN_PASS = "153154";
         // --------------------
 
         const { useState, useEffect, useCallback, useRef } = React;
@@ -95,33 +90,33 @@
         };
 
         /**
-         * 終極解決輸入問題：支援中文 IME 與數字輸入，完全不跳動
+         * 終極解決跳動方案：
+         * 完全使用本地 Ref 管理輸入文字，只有在特定的時間點 (失去焦點、按下 Enter) 才會同步回 App。
+         * 這保證了中文 IME 輸入時，React 不會介入進行重新渲染。
          */
-        const FinalSafeInput = ({ value, onFinalChange, placeholder, className, type = "text" }) => {
-            const [local, setLocal] = useState(value || '');
-            const isComposing = useRef(false);
+        const StableInput = ({ defaultValue, onFinalChange, placeholder, className, type = "text" }) => {
+            const inputRef = useRef(null);
 
-            useEffect(() => { 
-                if (!isComposing.current && value !== local) setLocal(value || ''); 
-            }, [value]);
-
-            const update = (val) => {
-                setLocal(val);
-                // 只有在非組字期間（非中文輸入過程），才同步回全局狀態
-                if (!isComposing.current) onFinalChange(val);
+            const handleCommit = () => {
+                if (inputRef.current) {
+                    onFinalChange(inputRef.current.value);
+                }
             };
 
             return (
                 <input 
-                    type={type} value={local} placeholder={placeholder} className={className}
-                    onChange={(e) => update(e.target.value)}
-                    onCompositionStart={() => { isComposing.current = true; }}
-                    onCompositionEnd={(e) => {
-                        isComposing.current = false;
-                        onFinalChange(e.target.value);
+                    ref={inputRef}
+                    type={type} 
+                    defaultValue={defaultValue || ''} 
+                    placeholder={placeholder} 
+                    className={className}
+                    onBlur={handleCommit}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            handleCommit();
+                            e.target.blur(); // 強制失去焦點觸發同步
+                        }
                     }}
-                    onBlur={() => onFinalChange(local)}
-                    onKeyDown={(e) => e.key === 'Enter' && onFinalChange(local)}
                     autoComplete="off"
                 />
             );
@@ -178,12 +173,13 @@
             }, [processQuestionText]);
 
             const handleFinalAction = async () => {
+                // 最後檢查一次信箱
                 if (!studentInfo.email || !studentInfo.email.includes('@')) {
-                    showMsg('請輸入正確的 Gmail 信箱地址');
+                    showMsg('請輸入正確的 Gmail 信箱');
                     return;
                 }
                 
-                setEmailStatus('正在同步成績並發送郵件...');
+                setEmailStatus('同步成績與發送郵件中...');
                 
                 const scorePerQuestion = 100 / quizData.length;
                 let correctCount = 0;
@@ -220,9 +216,9 @@
                         mode: 'no-cors',
                         body: JSON.stringify(payload)
                     });
-                    setEmailStatus('成績已上傳！請檢查信箱。');
+                    setEmailStatus('成績上傳成功！');
                 } catch (e) {
-                    setEmailStatus('連線失敗，請檢查網路。');
+                    setEmailStatus('伺服器連線異常。');
                 }
             };
 
@@ -235,10 +231,10 @@
                     </div>
                     <div className="w-full max-w-md bg-slate-900/60 p-8 rounded-[2rem] border border-slate-800 shadow-2xl">
                         <div className="space-y-6">
-                            <FinalSafeInput placeholder="班級 (例如 101)" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.class} onFinalChange={v => setStudentInfo(p => ({...p, class: v}))} />
+                            <StableInput placeholder="班級 (例如 101)" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none transition-all" defaultValue={studentInfo.class} onFinalChange={v => setStudentInfo(p => ({...p, class: v}))} />
                             <div className="grid grid-cols-2 gap-4">
-                                <FinalSafeInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.seat} onFinalChange={v => setStudentInfo(p => ({...p, seat: v}))} />
-                                <FinalSafeInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" value={studentInfo.name} onFinalChange={v => setStudentInfo(p => ({...p, name: v}))} />
+                                <StableInput placeholder="座號" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" defaultValue={studentInfo.seat} onFinalChange={v => setStudentInfo(p => ({...p, seat: v}))} />
+                                <StableInput placeholder="姓名" className="bg-slate-950 border border-slate-800 rounded-xl px-5 py-3 text-slate-100 focus:border-amber-500 outline-none" defaultValue={studentInfo.name} onFinalChange={v => setStudentInfo(p => ({...p, name: v}))} />
                             </div>
                             <button onClick={() => quizData.length > 0 ? setView('quiz') : showMsg('載入中...')} className="w-full bg-amber-600 text-slate-950 font-black py-4.5 rounded-2xl mt-4 active:scale-95 transition-all text-lg shadow-xl shadow-amber-900/20">開始測驗</button>
                         </div>
@@ -255,13 +251,9 @@
                             <p className="text-slate-500 font-mono text-sm uppercase">{currentQuestionIndex + 1} / {quizData.length}</p>
                         </div>
                         <div className="bg-slate-900 border border-slate-800 p-8 md:p-14 rounded-[3rem] shadow-2xl min-h-[550px] flex flex-col justify-between relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
-                                <div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div>
-                            </div>
+                            <div className="absolute top-0 left-0 w-full h-1 bg-slate-800"><div className="h-full bg-amber-500 transition-all duration-300" style={{width: `${((currentQuestionIndex + 1)/quizData.length)*100}%`}}></div></div>
                             <div>
-                                <h3 className="text-2xl md:text-3xl font-bold mb-12 leading-relaxed text-slate-100 italic">
-                                    {currentQuestionIndex + 1}. {q.stem}
-                                </h3>
+                                <h3 className="text-2xl md:text-3xl font-bold mb-12 leading-relaxed text-slate-100 italic">{currentQuestionIndex + 1}. {q.stem}</h3>
                                 <div className="grid grid-cols-1 gap-5">
                                     {['A', 'B', 'C', 'D'].map(opt => (
                                         <button key={opt} onClick={() => setAnswers({...answers, [currentQuestionIndex]: opt})}
@@ -276,8 +268,8 @@
                                 <button disabled={currentQuestionIndex === 0} onClick={() => setCurrentQuestionIndex(p => p-1)} className="text-slate-500 hover:text-white disabled:opacity-0 transition-all font-bold"><Icon name="chevron-left" size={18}/> 上一題</button>
                                 {currentQuestionIndex === quizData.length - 1 
                                     ? <div className="flex flex-col items-end gap-3">
-                                        <FinalSafeInput placeholder="輸入 Gmail 以存檔寄信" className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 text-sm w-64 outline-none focus:border-amber-500" value={studentInfo.email} onFinalChange={v => setStudentInfo({...studentInfo, email: v})} />
-                                        <button onClick={handleFinalAction} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all text-lg tracking-widest">確認提交並寄送</button>
+                                        <StableInput placeholder="請輸入 Gmail 以利寄信" className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 text-sm w-64 outline-none focus:border-amber-500" defaultValue={studentInfo.email} onFinalChange={v => setStudentInfo(p => ({...p, email: v}))} />
+                                        <button onClick={handleFinalAction} className="bg-green-600 px-12 py-3 rounded-xl font-black text-white shadow-xl active:scale-95 transition-all">確認提交並寄送</button>
                                       </div>
                                     : <button onClick={() => setCurrentQuestionIndex(prev => prev+1)} className="text-amber-500 font-bold flex items-center gap-1 hover:translate-x-1 transition-transform">下一題 <Icon name="chevron-right" size={18}/></button>}
                             </div>
@@ -294,26 +286,17 @@
                             <p className="text-slate-900 font-black tracking-widest uppercase text-xs">{emailStatus || 'Score Report'}</p>
                         </div>
                         <div className="p-8 md:p-14 print:p-0">
-                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 flex items-center justify-center gap-2">
-                                <Icon name="download" size={20}/> 下載或列印精簡成果單 (PDF)
-                            </button>
+                            <button onClick={() => window.print()} className="w-full bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl mb-12 font-bold no-print border border-slate-700 flex items-center justify-center gap-2"><Icon name="download" size={20}/> 下載成果報告單 (PDF)</button>
 
                             <div className="hidden print:block print-header">
                                 <div className="print-title">國文科測驗成果分析報告</div>
-                                <div className="print-meta">
-                                    姓名：{results.name} ({results.class} 班 {results.seat} 號) | 
-                                    得分：{results.score} 分<br />
-                                    單元：{quizName} | 日期：{results.date}
-                                </div>
+                                <div className="print-meta">姓名：{results.name} ({results.class} 班 {results.seat} 號) | 得分：{results.score} 分<br />單元：{results.quizName} | 日期：{results.date}</div>
                             </div>
 
-                            <div className="space-y-10 print:space-y-8">
+                            <div className="space-y-10">
                                 {results.detailsData.map((item, idx) => (
                                     <div key={idx} className="print-card p-6 border border-slate-800 print:border-none print:p-0">
-                                        <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4">
-                                            <span className="text-slate-600 font-mono mr-3 text-sm print:text-black">Q{idx+1}.</span>{item.stem}
-                                        </p>
-                                        
+                                        <p className="print-text text-slate-100 text-xl md:text-2xl font-bold leading-relaxed mb-4"><span className="text-slate-600 font-mono mr-3 text-sm print:text-black">Q{idx+1}.</span>{item.stem}</p>
                                         <div className="mb-6 space-y-2">
                                             {item.options && ['A','B','C','D'].map(o => (
                                                 <div key={o} className={`text-sm md:text-base print-option ${
@@ -325,22 +308,11 @@
                                                 </div>
                                             ))}
                                         </div>
-
                                         <div className="print-text flex gap-8 text-sm font-bold border-t border-slate-800/50 pt-4 print:border-none">
-                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>
-                                                您的作答：[{item.studentAnswer}]
-                                            </span>
-                                            <span className="text-green-400">
-                                                正確答案：[{item.answer}]
-                                            </span>
+                                            <span className={item.isCorrect ? 'text-green-400' : 'text-red-400'}>您的作答：[{item.studentAnswer}]</span>
+                                            <span className="text-green-400">正確答案：[{item.answer}]</span>
                                         </div>
-
-                                        {!item.isCorrect && (
-                                            <div className="print-explanation text-lg md:text-xl text-slate-300 italic mt-5 bg-slate-950/40 p-5 rounded-2xl print:text-black print:bg-none print:p-2 border-l-4 border-amber-600">
-                                                <span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black tracking-widest">解析說明：</span>
-                                                {item.explanation}
-                                            </div>
-                                        )}
+                                        {!item.isCorrect && <div className="print-explanation text-lg md:text-xl text-slate-300 italic mt-5 bg-slate-950/40 p-5 rounded-2xl print:text-black print:bg-none print:p-2 border-l-4 border-amber-600"><span className="text-amber-500 font-bold block mb-1 uppercase text-xs print:text-black tracking-widest">解析說明：</span>{item.explanation}</div>}
                                     </div>
                                 ))}
                             </div>
@@ -352,11 +324,7 @@
 
             return (
                 <div className="min-h-screen">
-                    {msg && (
-                        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] bg-amber-500 text-slate-950 px-6 py-3 rounded-full font-bold shadow-2xl animate-fade-in">
-                            {msg}
-                        </div>
-                    )}
+                    {msg && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] bg-amber-500 text-slate-950 px-6 py-3 rounded-full font-bold shadow-2xl animate-fade-in">{msg}</div>}
                     {view === 'login' && <LoginView />}
                     {view === 'quiz' && <QuizView />}
                     {view === 'results' && <ResultsView />}
